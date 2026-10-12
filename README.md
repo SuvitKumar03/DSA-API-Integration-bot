@@ -47,7 +47,9 @@ uvicorn app.main:app --reload               # web UI at http://localhost:8000
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | Required |
+| `PROVIDER` | `anthropic` | `anthropic` (Claude API), `openai_compatible` (Gemini, Groq, OpenRouter, Ollama, ...), or `claude_code` (local Claude Code CLI on your own subscription; personal local testing only, refuses access codes and non-localhost requests) |
+| `ANTHROPIC_API_KEY` | — | Required when `PROVIDER=anthropic` |
+| `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | — | Endpoint, key and model when `PROVIDER=openai_compatible`; see `.env.example` |
 | `CLAUDE_MODEL` | `claude-opus-5-5` | Model used for answers |
 | `CLAUDE_EFFORT` | `medium` | `low` / `medium` / `high`: depth vs. speed and cost |
 | `ENABLE_FALLBACKS` | `true` | If Claude declines a request, retry on a fallback model (Claude API only) |

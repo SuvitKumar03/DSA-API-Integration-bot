@@ -1,0 +1,837 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Integration Assistant</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2314B8A6'/%3E%3Cstop offset='1' stop-color='%233B5BDB'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M20 2.5C20 2.5 6.5 17 6.5 25.5a13.5 13.5 0 0 0 27 0C33.5 17 20 2.5 20 2.5Z' fill='url(%23g)'/%3E%3Cpath d='M16.4 19.2c-1.5 0-2.1.8-2.1 2.1v1.7c0 .9-.5 1.5-1.5 1.6 1 .1 1.5.7 1.5 1.6v1.7c0 1.3.6 2.1 2.1 2.1M23.6 19.2c1.5 0 2.1.8 2.1 2.1v1.7c0 .9.5 1.5 1.5 1.6-1 .1-1.5.7-1.5 1.6v1.7c0 1.3-.6 2.1-2.1 2.1' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round'/%3E%3Ccircle cx='20' cy='24.6' r='1.7' fill='white'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f7fb;
+    --surface: #ffffff;
+    --surface-2: #f8fafc;
+    --ink: #0f1b2d;
+    --ink-2: #334155;
+    --muted: #64748b;
+    --border: #e2e8f0;
+    --border-strong: #cbd5e1;
+    --accent: #2f5bea;
+    --accent-hover: #2449c7;
+    --accent-soft: #eef2ff;
+    --teal: #0d9488;
+    --teal-soft: #e6f6f4;
+    --danger: #c0362c;
+    --danger-soft: #fdecea;
+    --code-bg: #f6f8fb;
+    --shadow-sm: 0 1px 2px rgba(15, 27, 45, .06);
+    --shadow-md: 0 4px 16px rgba(15, 27, 45, .08);
+    --radius: 14px;
+    --sidebar-w: 280px;
+    --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 15px/1.6 var(--font); -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; cursor: pointer; color: inherit; }
+  svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+
+  /* ---------- layout ---------- */
+  .app { display: flex; height: 100%; }
+  .sidebar {
+    width: var(--sidebar-w); flex: none; background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; padding: 18px 14px; gap: 18px; overflow-y: auto;
+  }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+  /* ---------- brand / logo ---------- */
+  .brand { display: flex; align-items: center; gap: 10px; padding: 0 6px; }
+  .brand .name { font-weight: 700; font-size: 15px; line-height: 1.25; letter-spacing: -.01em; }
+  .brand .tag { font-size: 12px; color: var(--muted); }
+  .logo { width: 36px; height: 36px; flex: none; }
+  .logo.lg { width: 64px; height: 64px; filter: drop-shadow(0 8px 18px rgba(47, 91, 234, .22)); }
+  .logo.sm { width: 30px; height: 30px; }
+
+  .btn-primary {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    background: var(--accent); color: #fff; border: none; border-radius: 10px;
+    padding: 10px 14px; font-weight: 600; font-size: 14px; box-shadow: var(--shadow-sm);
+    transition: background .15s;
+  }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-primary:disabled { opacity: .55; cursor: default; }
+
+  .side-label { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 0 8px; margin-bottom: 6px; }
+  .topics { display: flex; flex-direction: column; gap: 2px; }
+  .topic {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    background: transparent; border: none; border-radius: 9px; padding: 8px 10px;
+    font-size: 14px; color: var(--ink-2); transition: background .12s, color .12s;
+  }
+  .topic:hover { background: var(--accent-soft); color: var(--accent); }
+  .topic svg.i { color: var(--muted); }
+  .topic:hover svg.i { color: var(--accent); }
+
+  .mem-card {
+    margin-top: auto; background: var(--accent-soft); border: 1px solid #d7defe; border-radius: 12px;
+    padding: 12px 14px; font-size: 13px; color: #1e3a8a;
+  }
+  .mem-card:not([hidden]) + .tip-card { margin-top: 0; }
+  .mem-card strong { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 4px; }
+  .mem-card .mem-text { white-space: pre-wrap; max-height: 150px; overflow-y: auto; margin: 0 0 8px; color: var(--ink-2); }
+  .mem-card .mem-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); }
+  .mem-card button { border: 1px solid #c7d2fe; background: var(--surface); border-radius: 7px; padding: 3px 9px; font-size: 12px; color: var(--accent); }
+  .mem-card button:hover { border-color: var(--accent); }
+  .tip-card {
+    margin-top: auto; background: var(--teal-soft); border: 1px solid #c9ebe6; border-radius: 12px;
+    padding: 12px 14px; font-size: 13px; color: #134e4a;
+  }
+  .tip-card strong { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 4px; }
+  .tip-card p { margin: 0 0 6px; } .tip-card p:last-child { margin: 0; }
+
+  /* ---------- top bar ---------- */
+  .topbar {
+    display: flex; align-items: center; gap: 12px; padding: 12px 20px; min-height: 60px;
+    background: rgba(255, 255, 255, .85); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+  }
+  .topbar .title { flex: 1; min-width: 0; }
+  .topbar .title h1 { margin: 0; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--teal);
+    background: var(--teal-soft); border-radius: 999px; padding: 3px 10px; font-weight: 500;
+  }
+  .chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 0 3px rgba(13, 148, 136, .18); }
+  .icon-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 9px;
+    padding: 7px 10px; font-size: 13px; color: var(--ink-2); transition: border-color .12s, color .12s;
+  }
+  .icon-btn:hover { border-color: var(--border-strong); color: var(--ink); }
+  .menu-btn, .mobile-brand { display: none; }
+
+  /* ---------- conversation ---------- */
+  .scroller { flex: 1; overflow-y: auto; position: relative; scroll-behavior: smooth; }
+  .thread { max-width: 860px; margin: 0 auto; padding: 28px 24px 16px; }
+
+  .welcome { text-align: center; padding: 32px 0 8px; }
+  .welcome h2 { margin: 16px 0 6px; font-size: 26px; letter-spacing: -.02em; }
+  .welcome > p { margin: 0 auto 28px; max-width: 520px; color: var(--muted); }
+  .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; text-align: left; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px;
+    box-shadow: var(--shadow-sm); transition: border-color .15s, box-shadow .15s, transform .15s; text-align: left;
+    display: flex; flex-direction: column; justify-content: flex-start; align-items: flex-start;
+  }
+  .card:hover { border-color: #c7d2fe; box-shadow: var(--shadow-md); transform: translateY(-1px); }
+  .card .k { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--accent); margin-bottom: 4px; }
+  .card .k svg.i { width: 15px; height: 15px; }
+  .card .q { font-size: 14px; color: var(--ink); }
+
+  .msg { display: flex; gap: 12px; margin-bottom: 22px; animation: rise .2s ease-out; }
+  @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  .msg.user { justify-content: flex-end; }
+  .msg.user .bubble {
+    background: var(--accent); color: #fff; padding: 11px 15px; border-radius: 16px 16px 4px 16px;
+    max-width: min(85%, 640px); white-space: pre-wrap; overflow-wrap: anywhere; box-shadow: var(--shadow-sm);
+  }
+  .msg.bot .avatar { padding-top: 2px; }
+  .msg.bot .body { flex: 1; min-width: 0; }
+  .msg.bot .who { font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--ink-2); }
+  .answer {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 4px var(--radius) var(--radius) var(--radius);
+    padding: 14px 18px; box-shadow: var(--shadow-sm); overflow-wrap: anywhere;
+  }
+  .answer > :first-child { margin-top: 0; } .answer > :last-child { margin-bottom: 0; }
+  .answer p { margin: 0 0 10px; }
+  .answer h1, .answer h2, .answer h3, .answer h4 { font-size: 15px; margin: 16px 0 8px; }
+  .answer ul, .answer ol { margin: 0 0 10px; padding-left: 22px; }
+  .answer li { margin: 3px 0; }
+  .answer a { color: var(--accent); }
+  .answer blockquote { margin: 0 0 10px; padding: 6px 12px; border-left: 3px solid var(--border-strong); color: var(--ink-2); background: var(--surface-2); border-radius: 0 8px 8px 0; }
+  .answer :not(pre) > code {
+    font-family: var(--mono); font-size: 12.5px; background: var(--accent-soft); color: #1e3a8a;
+    padding: 1px 6px; border-radius: 5px;
+  }
+  .answer table { border-collapse: collapse; margin: 0 0 12px; font-size: 13px; display: block; overflow-x: auto; max-width: 100%; }
+  .answer th { background: var(--surface-2); font-weight: 600; }
+  .answer th, .answer td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; }
+
+  .code { border: 1px solid var(--border); border-radius: 10px; margin: 0 0 12px; overflow: hidden; background: var(--code-bg); }
+  .code-head {
+    display: flex; align-items: center; justify-content: space-between; padding: 6px 8px 6px 12px;
+    border-bottom: 1px solid var(--border); background: #eef2f7; font-size: 12px; color: var(--muted);
+    font-family: var(--mono);
+  }
+  .code-head button {
+    display: inline-flex; align-items: center; gap: 5px; border: none; background: transparent;
+    font: 500 12px var(--font); color: var(--muted); padding: 3px 6px; border-radius: 6px;
+  }
+  .code-head button:hover { background: #e2e8f0; color: var(--ink); }
+  .code-head svg.i { width: 14px; height: 14px; }
+  .code pre { margin: 0; padding: 12px 14px; overflow-x: auto; }
+  .code pre code { font-family: var(--mono); font-size: 12.5px; line-height: 1.6; color: #1e293b; }
+
+  .source {
+    display: flex; align-items: flex-start; gap: 8px; margin-top: 12px !important; padding: 8px 12px;
+    background: var(--surface-2); border: 1px dashed var(--border-strong); border-radius: 9px;
+    font-size: 13px; color: var(--ink-2);
+  }
+  .source svg.i { width: 16px; height: 16px; margin-top: 2px; color: var(--teal); }
+
+  .typing { display: inline-flex; align-items: center; gap: 10px; color: var(--muted); font-size: 14px; }
+  .dots { display: inline-flex; gap: 4px; }
+  .dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); opacity: .35; animation: bounce 1.2s infinite; }
+  .dots span:nth-child(2) { animation-delay: .15s; } .dots span:nth-child(3) { animation-delay: .3s; }
+  @keyframes bounce { 0%, 60%, 100% { opacity: .35; transform: none; } 30% { opacity: 1; transform: translateY(-3px); } }
+  .cursor::after { content: ""; display: inline-block; width: 7px; height: 15px; margin-left: 2px; vertical-align: -2px; background: var(--accent); border-radius: 1px; animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .actions { display: flex; align-items: center; gap: 2px; margin-top: 6px; }
+  .act {
+    display: inline-flex; align-items: center; gap: 5px; border: 1px solid transparent; background: transparent;
+    color: var(--muted); border-radius: 7px; padding: 4px 8px; font-size: 12.5px;
+  }
+  .act:hover { background: var(--surface); border-color: var(--border); color: var(--ink); }
+  .act.on { color: var(--accent); background: var(--accent-soft); }
+  .act svg.i { width: 15px; height: 15px; }
+  .act.down svg.i { transform: scaleY(-1); }
+  .stopped { font-size: 12px; color: var(--muted); margin-left: 6px; }
+
+  .fb-form {
+    margin-top: 8px; display: flex; flex-direction: column; gap: 8px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 12px; padding: 12px; max-width: 520px; box-shadow: var(--shadow-sm);
+  }
+  .fb-form label { font-size: 13px; font-weight: 600; }
+  .fb-form textarea {
+    resize: vertical; min-height: 64px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+    font: inherit; font-size: 14px; color: var(--ink); background: var(--surface-2);
+  }
+  .fb-form .row { display: flex; gap: 8px; justify-content: flex-end; }
+  .fb-form .btn-primary { padding: 7px 12px; font-size: 13px; }
+
+  .err {
+    display: flex; align-items: flex-start; gap: 10px; background: var(--danger-soft); color: var(--danger);
+    border: 1px solid #f5c2bd; border-radius: 12px; padding: 12px 14px; font-size: 14px;
+  }
+  .err .act { color: var(--danger); margin-left: auto; border-color: #f5c2bd; background: #fff; }
+
+  .jump {
+    position: sticky; bottom: 12px; margin: 0 auto; display: none; align-items: center; gap: 6px;
+    background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-md);
+    border-radius: 999px; padding: 6px 12px; font-size: 13px; color: var(--ink-2);
+  }
+  .jump.show { display: flex; }
+
+  /* ---------- composer ---------- */
+  .composer-wrap { padding: 8px 24px 16px; background: linear-gradient(to bottom, rgba(245, 247, 251, 0), var(--bg) 30%); }
+  .composer {
+    max-width: 860px; margin: 0 auto; background: var(--surface); border: 1px solid var(--border-strong);
+    border-radius: 16px; box-shadow: var(--shadow-md); padding: 10px 10px 8px 16px; transition: border-color .15s, box-shadow .15s;
+  }
+  .composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(47, 91, 234, .12), var(--shadow-md); }
+  .composer textarea {
+    width: 100%; border: none; outline: none; resize: none; font: inherit; color: var(--ink);
+    background: transparent; min-height: 26px; max-height: 220px; padding: 4px 0;
+  }
+  .composer textarea::placeholder { color: #94a3b8; }
+  .composer .bar { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 4px; }
+  .composer .hint { flex: 1; font-size: 12px; color: #94a3b8; }
+  .composer .count { font-size: 12px; color: var(--muted); }
+  .composer .count.over { color: var(--danger); font-weight: 600; }
+  .send {
+    width: 38px; height: 38px; border-radius: 11px; border: none; background: var(--accent); color: #fff;
+    display: inline-flex; align-items: center; justify-content: center; transition: background .15s, opacity .15s;
+  }
+  .send:hover { background: var(--accent-hover); }
+  .send:disabled { opacity: .4; cursor: default; }
+  .send.stop { background: var(--ink); }
+  .send.stop svg.i { fill: currentColor; stroke: none; }
+  .disclaimer { max-width: 860px; margin: 8px auto 0; text-align: center; font-size: 12px; color: var(--muted); }
+
+  /* ---------- login ---------- */
+  .login {
+    position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center; padding: 16px;
+    background: radial-gradient(1200px 600px at 50% -10%, #e0e7ff 0%, var(--bg) 55%);
+  }
+  .login.show { display: flex; }
+  .login form {
+    width: 100%; max-width: 380px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 18px; padding: 32px 28px; box-shadow: var(--shadow-md); text-align: center;
+  }
+  .login h2 { margin: 14px 0 6px; font-size: 20px; letter-spacing: -.01em; }
+  .login p { margin: 0 0 20px; color: var(--muted); font-size: 14px; }
+  .login input {
+    width: 100%; padding: 11px 14px; border-radius: 10px; border: 1px solid var(--border-strong);
+    font: inherit; color: var(--ink); background: var(--surface-2); margin-bottom: 10px;
+  }
+  .login input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px rgba(47, 91, 234, .12); }
+  .login .btn-primary { width: 100%; padding: 11px; }
+  .login .msg-err { min-height: 20px; font-size: 13px; color: var(--danger); margin-bottom: 8px; }
+
+  /* ---------- toast ---------- */
+  .toast {
+    position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 20px); opacity: 0; z-index: 40;
+    background: var(--ink); color: #fff; font-size: 13px; padding: 9px 14px; border-radius: 10px;
+    transition: opacity .2s, transform .2s; pointer-events: none; box-shadow: var(--shadow-md);
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  .scrim { display: none; }
+
+  /* ---------- responsive ---------- */
+  @media (max-width: 960px) {
+    .sidebar {
+      position: fixed; inset: 0 auto 0 0; z-index: 20; transform: translateX(-100%);
+      transition: transform .2s ease; box-shadow: var(--shadow-md);
+    }
+    .sidebar.open { transform: none; }
+    .scrim.open { display: block; position: fixed; inset: 0; z-index: 15; background: rgba(15, 27, 45, .3); }
+    .menu-btn { display: inline-flex; }
+    .mobile-brand { display: inline-flex; }
+    .topbar { padding: 10px 16px; }
+    .topbar .chip { display: none; }
+    .thread { padding: 20px 16px 12px; }
+    .composer-wrap { padding: 8px 16px 12px; }
+  }
+  @media (max-width: 600px) {
+    .cards { grid-template-columns: 1fr; }
+    .welcome h2 { font-size: 22px; }
+    .msg.bot .avatar { display: none; }
+    .composer .hint { display: none; }
+    .icon-btn .lbl { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Bot mark: a sample droplet holding API braces. Defined once, reused everywhere. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="dropGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#14B8A6"/>
+      <stop offset="1" stop-color="#3B5BDB"/>
+    </linearGradient>
+    <symbol id="botmark" viewBox="0 0 40 40">
+      <path d="M20 2.5C20 2.5 6.5 17 6.5 25.5a13.5 13.5 0 0 0 27 0C33.5 17 20 2.5 20 2.5Z" fill="url(#dropGrad)"/>
+      <path d="M13.5 12.5c1.2-2 2.6-3.9 3.9-5.5" fill="none" stroke="white" stroke-opacity=".45" stroke-width="1.6" stroke-linecap="round"/>
+      <path d="M16.4 19.2c-1.5 0-2.1.8-2.1 2.1v1.7c0 .9-.5 1.5-1.5 1.6 1 .1 1.5.7 1.5 1.6v1.7c0 1.3.6 2.1 2.1 2.1M23.6 19.2c1.5 0 2.1.8 2.1 2.1v1.7c0 .9.5 1.5 1.5 1.6-1 .1-1.5.7-1.5 1.6v1.7c0 1.3-.6 2.1-2.1 2.1" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="20" cy="24.6" r="1.7" fill="white"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="app">
+  <aside class="sidebar" id="sidebar" aria-label="Sidebar">
+    <div class="brand">
+      <svg class="logo" aria-hidden="true"><use href="#botmark"/></svg>
+      <div>
+        <div class="name" data-bot-name>Integration Assistant</div>
+        <div class="tag">Partner API help, 24×7</div>
+      </div>
+    </div>
+
+    <button class="btn-primary" id="newChat" type="button">
+      <svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> New chat
+    </button>
+
+    <nav>
+      <div class="side-label">Browse topics</div>
+      <div class="topics" id="topics"></div>
+    </nav>
+
+    <div class="mem-card" id="memCard" hidden>
+      <strong>
+        <svg class="i" viewBox="0 0 24 24"><path d="M12 3a7 7 0 0 0-4 12.7V19h8v-3.3A7 7 0 0 0 12 3z"/><path d="M10 22h4"/></svg>
+        What I remember
+      </strong>
+      <p class="mem-text" id="memText"></p>
+      <div class="mem-foot"><span>Saved only in this browser</span><button type="button" id="memForget">Forget</button></div>
+    </div>
+
+    <div class="tip-card">
+      <strong>
+        <svg class="i" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>
+        Tips for best answers
+      </strong>
+      <p>Paste your full request and the error response; I'll check it field by field.</p>
+      <p>Replace real tokens, passwords and patient details with placeholders.</p>
+    </div>
+  </aside>
+  <div class="scrim" id="scrim"></div>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn menu-btn" id="menuBtn" type="button" aria-label="Open menu">
+        <svg class="i" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <svg class="logo sm mobile-brand" aria-hidden="true"><use href="#botmark"/></svg>
+      <div class="title"><h1 id="convTitle">New conversation</h1></div>
+      <span class="chip"><span class="dot"></span> Answers from official API docs</span>
+      <button class="icon-btn" id="newChatTop" type="button" title="New chat">
+        <svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span class="lbl">New</span>
+      </button>
+      <button class="icon-btn" id="logout" type="button" style="display:none" title="Log out">
+        <svg class="i" viewBox="0 0 24 24"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H4"/></svg><span class="lbl">Log out</span>
+      </button>
+    </header>
+
+    <main class="scroller" id="scroller" aria-live="polite">
+      <div class="thread" id="thread"></div>
+      <button class="jump" id="jump" type="button">
+        <svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12l7 7 7-7"/></svg> Latest
+      </button>
+    </main>
+
+    <footer class="composer-wrap">
+      <form class="composer" id="composer">
+        <label for="input" class="sr-only" style="position:absolute;left:-9999px">Your question</label>
+        <textarea id="input" rows="1" placeholder="Ask about an API, or paste your request and error…"></textarea>
+        <div class="bar">
+          <span class="hint">Enter to send · Shift + Enter for a new line</span>
+          <span class="count" id="count"></span>
+          <button class="send" id="send" type="submit" aria-label="Send" disabled>
+            <svg class="i" viewBox="0 0 24 24" id="sendIcon"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+          </button>
+        </div>
+      </form>
+      <div class="disclaimer">AI answers can be wrong — verify in sandbox before going live. Never share real tokens, passwords or patient data.</div>
+    </footer>
+  </div>
+</div>
+
+<div class="login" id="login">
+  <form id="loginForm">
+    <svg class="logo lg" aria-hidden="true"><use href="#botmark"/></svg>
+    <h2 data-bot-name>Integration Assistant</h2>
+    <p>Enter the access code shared by the integration team to continue.</p>
+    <input id="code" type="password" placeholder="Access code" autocomplete="off" required aria-label="Access code">
+    <div class="msg-err" id="loginError" role="alert"></div>
+    <button class="btn-primary" type="submit">Continue</button>
+  </form>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  del(k) { try { localStorage.removeItem(k); } catch {} },
+};
+
+const ICONS = {
+  key: '<circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3L20 3M16.5 6.5l3 3M14.5 8.5l2 2"/>',
+  layers: '<path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/>',
+  calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  box: '<path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>',
+  user: '<circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M19 8v6M16 11h6"/>',
+  file: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/>',
+  zap: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',
+  alert: '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>',
+  copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>',
+  check: '<path d="M5 12l5 5L20 7"/>',
+  thumb: '<path d="M7 10v10H4V10h3z"/><path d="M7 10l4-7a2 2 0 0 1 2 2v4h5a2 2 0 0 1 2 2.3l-1.3 7A2 2 0 0 1 16.7 20H7"/>',
+  book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/>',
+  refresh: '<path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v4h-4"/>',
+  send: '<path d="M12 19V5M5 12l7-7 7 7"/>',
+  stop: '<rect x="7" y="7" width="10" height="10" rx="1.5"/>',
+};
+const icon = (name) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
+
+const TOPICS = [
+  ["key", "Authentication", "Explain authentication: how do I log in, which headers must I send on every call, and how long is the token valid?"],
+  ["layers", "Catalog & pricing", "How do I fetch the catalog of tests and packages, and which fields should I use when booking?"],
+  ["calendar", "Slots & serviceability", "How do I check pincode serviceability and available slots before booking?"],
+  ["box", "Create order", "Walk me through creating an order with the Create Order API, with a sample request."],
+  ["user", "Leads", "Walk me through creating a lead with the Lead API, with a sample request."],
+  ["file", "Reports", "How do I get the report for an order, and in which formats?"],
+  ["zap", "Webhooks", "How do webhooks work: setup, events and payload?"],
+];
+
+const SUGGESTIONS = [
+  ["key", "Authentication", "How do I get an auth token and use it in the other APIs?"],
+  ["user", "Leads", "Show me a sample Create Lead request with all required fields."],
+  ["alert", "Errors", "Why am I getting a 401 UNAUTHORIZED error?"],
+  ["file", "Reports", "How do I download the report for an order?"],
+  ["zap", "Webhooks", "Which webhook events will I receive, and what does the payload look like?"],
+  ["layers", "Field formats", "What are the valid gender and ageType values in the Lead API vs the Create Order API?"],
+];
+
+let cfg = { botName: "Integration Assistant", maxChars: 8000 };
+let accessCode = store.get("accessCode") || "";
+let history = [];          // [{role, content}]
+let controller = null;     // AbortController while streaming
+
+/* ---------- session memory (summary kept only in this browser) ---------- */
+const MEM_KEY = "ia.memory.v1";
+let summarizedUpTo = 0;    // history index already folded into the memory
+let summarizing = false;
+let idleTimer = null;
+
+function loadMemory() {
+  try {
+    const m = JSON.parse(store.get(MEM_KEY) || "null");
+    if (!m?.summary) return null;
+    if (Date.now() - m.updatedAt > (cfg.summaryTtlDays || 30) * 86400000) { store.del(MEM_KEY); return null; }
+    return m;
+  } catch { return null; }
+}
+function saveMemory(summary) {
+  store.set(MEM_KEY, JSON.stringify({ summary, updatedAt: Date.now() }));
+  showMemory();
+}
+function forgetMemory() { store.del(MEM_KEY); summarizedUpTo = history.length; showMemory(); }
+function showMemory() {
+  const m = loadMemory();
+  $("memCard").hidden = !m;
+  $("memText").textContent = m?.summary || "";
+}
+
+// Fold the messages not yet summarised into the memory. Called after a quiet period,
+// every few messages, on "New chat", and when the tab is hidden.
+async function summarizeNow() {
+  clearTimeout(idleTimer);
+  if (summarizing || controller) return;
+  const upTo = history.length;
+  const fresh = history.slice(summarizedUpTo, upTo);
+  if (fresh.length < 2) return;
+  summarizing = true;
+  try {
+    const res = await api("/api/summarize", { messages: fresh, previous: loadMemory()?.summary || "" });
+    if (res.ok) {
+      const { summary } = await res.json();
+      if (summary) saveMemory(summary);
+      summarizedUpTo = Math.max(summarizedUpTo, upTo);
+    }
+  } catch {} finally { summarizing = false; }
+}
+function scheduleSummary() {
+  clearTimeout(idleTimer);
+  if (history.length - summarizedUpTo >= (cfg.summaryEveryMessages || 12)) { summarizeNow(); return; }
+  idleTimer = setTimeout(summarizeNow, (cfg.summaryIdleMinutes || 10) * 60000);
+}
+
+marked.setOptions({ gfm: true, breaks: true });
+DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+  if (node.tagName === "A") { node.setAttribute("target", "_blank"); node.setAttribute("rel", "noopener noreferrer"); }
+});
+
+/* ---------- helpers ---------- */
+function toast(text) {
+  const t = $("toast"); t.textContent = text; t.classList.add("show");
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove("show"), 1800);
+}
+async function copyText(text, btn) {
+  try { await navigator.clipboard.writeText(text); } catch { toast("Copy failed"); return; }
+  if (btn) {
+    const old = btn.innerHTML; btn.innerHTML = icon("check") + " Copied";
+    setTimeout(() => (btn.innerHTML = old), 1500);
+  }
+}
+const nearBottom = () => { const s = $("scroller"); return s.scrollHeight - s.scrollTop - s.clientHeight < 120; };
+function scrollDown(force) {
+  const s = $("scroller");
+  if (force || nearBottom()) s.scrollTop = s.scrollHeight;
+}
+$("scroller").addEventListener("scroll", () => $("jump").classList.toggle("show", !nearBottom()));
+$("jump").onclick = () => scrollDown(true);
+
+function api(path, body) {
+  return fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Access-Code": accessCode },
+    body: JSON.stringify(body ?? {}),
+  });
+}
+
+/* ---------- rendering ---------- */
+function renderMarkdown(el, text) {
+  el.innerHTML = DOMPurify.sanitize(marked.parse(text));
+  el.querySelectorAll("pre").forEach((pre) => {
+    const code = pre.querySelector("code");
+    const lang = (code?.className.match(/language-([\w-]+)/) || [])[1] || "code";
+    const wrap = document.createElement("div");
+    wrap.className = "code";
+    const head = document.createElement("div");
+    head.className = "code-head";
+    head.innerHTML = `<span>${lang}</span>`;
+    const btn = document.createElement("button");
+    btn.type = "button"; btn.innerHTML = icon("copy") + " Copy";
+    btn.onclick = () => copyText(code?.innerText ?? pre.innerText, btn);
+    head.appendChild(btn);
+    pre.replaceWith(wrap); wrap.append(head, pre);
+  });
+  // The bot ends answers with "Source: ..."; show it as a citation.
+  el.querySelectorAll("p").forEach((p) => {
+    if (/^\s*(\*\*)?sources?:/i.test(p.textContent)) {
+      p.classList.add("source");
+      p.insertAdjacentHTML("afterbegin", icon("book"));
+    }
+  });
+}
+
+function showWelcome() {
+  $("thread").innerHTML = `
+    <section class="welcome" id="welcome">
+      <svg class="logo lg" aria-hidden="true"><use href="#botmark"/></svg>
+      <h2>Hi, I'm ${DOMPurify.sanitize(cfg.botName)}</h2>
+      <p>Ask me anything about the partner APIs: authentication, catalog, slots, orders, leads, reports and webhooks. Paste a request or an error and I'll tell you exactly what to fix.</p>
+      <div class="cards">${SUGGESTIONS.map(([ic, k, q]) => `
+        <button class="card" type="button" data-q="${q.replace(/"/g, "&quot;")}">
+          <span class="k">${icon(ic)} ${k}</span><div class="q">${q}</div>
+        </button>`).join("")}
+      </div>
+    </section>`;
+  $("thread").querySelectorAll(".card").forEach((c) => c.addEventListener("click", () => ask(c.dataset.q)));
+}
+
+function addUser(text) {
+  $("welcome")?.remove();
+  const row = document.createElement("div");
+  row.className = "msg user";
+  row.innerHTML = '<div class="bubble"></div>';
+  row.firstChild.textContent = text;
+  $("thread").appendChild(row);
+  scrollDown(true);
+}
+
+function addBot() {
+  const row = document.createElement("div");
+  row.className = "msg bot";
+  row.innerHTML = `
+    <div class="avatar"><svg class="logo sm" aria-hidden="true"><use href="#botmark"/></svg></div>
+    <div class="body">
+      <div class="who">${DOMPurify.sanitize(cfg.botName)}</div>
+      <div class="answer"><span class="typing"><span class="dots"><span></span><span></span><span></span></span> Checking the documentation…</span></div>
+    </div>`;
+  $("thread").appendChild(row);
+  scrollDown(true);
+  return row;
+}
+
+function addActions(row, messageId, answer, stopped) {
+  const bar = document.createElement("div");
+  bar.className = "actions";
+  const mk = (cls, html, title, onClick) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "act " + cls; b.innerHTML = html; b.title = title;
+    b.onclick = () => onClick(b); bar.appendChild(b); return b;
+  };
+  mk("", icon("copy") + " Copy", "Copy answer", (b) => copyText(answer, b));
+  if (messageId && !stopped) {
+    const up = mk("", icon("thumb"), "Helpful", () => rate("up"));
+    const down = mk("down", icon("thumb"), "Not helpful", () => rate("down"));
+    const rate = (rating) => {
+      up.classList.toggle("on", rating === "up");
+      down.classList.toggle("on", rating === "down");
+      row.querySelector(".fb-form")?.remove();
+      if (rating === "up") { sendFeedback(messageId, "up", ""); return; }
+      const form = document.createElement("form");
+      form.className = "fb-form";
+      form.innerHTML = `
+        <label for="fb-${messageId}">What was wrong or missing? (optional)</label>
+        <textarea id="fb-${messageId}" maxlength="2000" placeholder="e.g. wrong field name, missing example, outdated rule…"></textarea>
+        <div class="row"><button type="button" class="act">Skip</button><button type="submit" class="btn-primary">Send feedback</button></div>`;
+      form.querySelector(".act").onclick = () => { sendFeedback(messageId, "down", ""); form.remove(); };
+      form.onsubmit = (e) => { e.preventDefault(); sendFeedback(messageId, "down", form.querySelector("textarea").value.trim()); form.remove(); };
+      row.querySelector(".body").appendChild(form);
+      form.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      form.querySelector("textarea").focus({ preventScroll: true });
+    };
+  }
+  if (stopped) bar.insertAdjacentHTML("beforeend", '<span class="stopped">Stopped</span>');
+  row.querySelector(".body").appendChild(bar);
+}
+
+function sendFeedback(message_id, rating, comment) {
+  api("/api/feedback", { message_id, rating, comment })
+    .then((r) => toast(r.ok ? "Thanks for the feedback" : "Couldn't send feedback"))
+    .catch(() => toast("Couldn't send feedback"));
+}
+
+function showError(row, message, question) {
+  const box = row.querySelector(".answer");
+  box.outerHTML = `<div class="err">${icon("alert")}<span>${DOMPurify.sanitize(message)}</span>
+    <button type="button" class="act">${icon("refresh")} Retry</button></div>`;
+  row.querySelector(".err .act").onclick = () => { row.remove(); $("thread").lastElementChild?.remove(); ask(question); };
+}
+
+/* ---------- chat ---------- */
+function setBusy(on) {
+  const send = $("send");
+  send.classList.toggle("stop", on);
+  send.setAttribute("aria-label", on ? "Stop" : "Send");
+  $("sendIcon").innerHTML = ICONS[on ? "stop" : "send"];
+  updateComposer();
+}
+
+async function ask(question) {
+  question = question.trim();
+  if (controller || !question) return;
+  if (question.length > cfg.maxChars) { toast(`Please keep questions under ${cfg.maxChars.toLocaleString()} characters`); return; }
+  if (!history.length) $("convTitle").textContent = question.length > 70 ? question.slice(0, 70) + "…" : question;
+  history.push({ role: "user", content: question });
+  addUser(question);
+  const row = addBot();
+  const box = row.querySelector(".answer");
+
+  controller = new AbortController();
+  setBusy(true);
+  let answer = "", messageId = null, stopped = false;
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Access-Code": accessCode },
+      body: JSON.stringify({ messages: history, summary: loadMemory()?.summary || "" }),
+      signal: controller.signal,
+    });
+    if (res.status === 401) {
+      history.pop(); row.remove(); $("thread").lastElementChild?.remove();
+      showLogin("Your access code is no longer valid."); return;
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(res.status === 429 ? "You've reached the hourly question limit. Please try again a little later."
+                                         : err.detail || `Something went wrong (${res.status}). Please try again.`);
+    }
+    messageId = res.headers.get("X-Message-Id");
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    box.classList.add("cursor");
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      answer += decoder.decode(value, { stream: true });
+      renderMarkdown(box, answer);
+      scrollDown();
+    }
+    if (!answer.trim()) throw new Error("No answer came back. Please try again.");
+  } catch (e) {
+    if (e.name === "AbortError") {
+      stopped = true;
+    } else {
+      history.pop();
+      showError(row, e.message, question);
+      return;
+    }
+  } finally {
+    box.classList.remove("cursor");
+    controller = null;
+    setBusy(false);
+    $("input").focus();
+  }
+  if (stopped && !answer.trim()) {
+    history.pop(); row.remove(); $("thread").lastElementChild?.remove();
+    $("input").value = question; updateComposer();
+    return;
+  }
+  renderMarkdown(box, answer);
+  history.push({ role: "assistant", content: answer });
+  scheduleSummary();
+  addActions(row, messageId, answer, stopped);
+}
+
+function newChat() {
+  controller?.abort();
+  summarizeNow();            // keep what was learned from this conversation
+  history = [];
+  summarizedUpTo = 0;
+  $("convTitle").textContent = "New conversation";
+  showWelcome();
+  closeMenu();
+  $("input").focus();
+}
+
+/* ---------- composer ---------- */
+const input = $("input");
+function updateComposer() {
+  input.style.height = "auto";
+  input.style.height = Math.min(input.scrollHeight, 220) + "px";
+  const n = input.value.length, over = n > cfg.maxChars;
+  const c = $("count");
+  c.textContent = n > cfg.maxChars * 0.8 ? `${n.toLocaleString()} / ${cfg.maxChars.toLocaleString()}` : "";
+  c.classList.toggle("over", over);
+  $("send").disabled = !controller && (!input.value.trim() || over);
+}
+input.addEventListener("input", updateComposer);
+input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("composer").requestSubmit(); }
+});
+$("composer").addEventListener("submit", (e) => {
+  e.preventDefault();
+  if (controller) { controller.abort(); return; }
+  const q = input.value;
+  if (!q.trim() || q.length > cfg.maxChars) return;
+  input.value = ""; updateComposer();
+  ask(q);
+});
+
+/* ---------- sidebar ---------- */
+$("topics").innerHTML = TOPICS.map(([ic, label, q], i) =>
+  `<button class="topic" type="button" data-i="${i}">${icon(ic)}<span>${label}</span></button>`).join("");
+$("topics").querySelectorAll(".topic").forEach((b) => b.addEventListener("click", () => { closeMenu(); ask(TOPICS[b.dataset.i][2]); }));
+$("newChat").onclick = newChat;
+$("newChatTop").onclick = newChat;
+const openMenu = () => { $("sidebar").classList.add("open"); $("scrim").classList.add("open"); };
+const closeMenu = () => { $("sidebar").classList.remove("open"); $("scrim").classList.remove("open"); };
+$("menuBtn").onclick = openMenu;
+$("scrim").onclick = closeMenu;
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
+
+/* ---------- login ---------- */
+function showLogin(msg) {
+  $("loginError").textContent = msg || "";
+  $("login").classList.add("show");
+  $("code").focus();
+}
+$("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  accessCode = $("code").value.trim();
+  const res = await api("/api/login").catch(() => null);
+  if (res?.ok) {
+    store.set("accessCode", accessCode);
+    $("login").classList.remove("show");
+    $("logout").style.display = "";
+    input.focus();
+  } else {
+    $("loginError").textContent = res ? "That access code isn't valid." : "Can't reach the server. Please try again.";
+  }
+});
+$("logout").onclick = () => {
+  store.del("accessCode"); store.del(MEM_KEY); accessCode = "";
+  history = []; newChat(); showMemory(); showLogin(); $("logout").style.display = "none";
+};
+$("memForget").onclick = () => { forgetMemory(); toast("Forgotten"); };
+document.addEventListener("visibilitychange", () => { if (document.hidden) summarizeNow(); });
+
+/* ---------- boot ---------- */
+(async () => {
+  const c = await fetch("/api/config").then((r) => r.json()).catch(() => ({}));
+  cfg = { ...cfg, ...c };
+  document.title = cfg.botName;
+  document.querySelectorAll("[data-bot-name]").forEach((el) => (el.textContent = cfg.botName));
+  showWelcome();
+  showMemory();
+  updateComposer();
+  if (cfg.requiresCode) {
+    const ok = accessCode && (await api("/api/login").catch(() => null))?.ok;
+    if (ok) $("logout").style.display = ""; else showLogin();
+  } else {
+    input.focus();
+  }
+})();
+</script>
+</body>
+</html>

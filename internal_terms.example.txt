@@ -1,0 +1,12 @@
+# Copy to internal_terms.txt (git-ignored) and list your internal names there.
+# Syntax: plain = case-insensitive word | cs: = case-sensitive word | re: = regex
+#         drop-line: regex (removed from docs) | rewrite: regex => replacement (applied to docs)
+
+# Hide an internal-only header from the docs and from answers
+drop-line: X-Internal-Debug-Token
+cs: X-Internal-Debug-Token
+
+# Internal services, databases and tools
+order-service-internal
+billing_db
+re: \b[\w-]+\.internal\.example\.com\b

@@ -218,3 +218,28 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# App chat logs (may contain partner data)
+logs/
+
+# Google Chat export: OAuth secrets and exported client conversations
+chat_export/credentials.json
+chat_export/token.json
+chat_export/output/
+
+# Internal names the bot must never reveal (the list itself is sensitive)
+internal_terms.txt
+
+# Colleague and client names used by the chat cleaner
+chat_export/private_names.json
+
+# Partner documentation and source PDFs (shared with partners under agreement, not public)
+*.pdf
+knowledge/*
+!knowledge/README.md
+
+# macOS
+.DS_Store
+
+# Internal notes (security findings, drafts for other teams)
+notes/
