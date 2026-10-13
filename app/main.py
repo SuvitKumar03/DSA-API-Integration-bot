@@ -1,5 +1,6 @@
 """FastAPI app: serves the chat UI and the chat API."""
 
+import hashlib
 import json
 import logging
 import time
@@ -10,14 +11,16 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from bot import config
+from bot import admin_auth, config
 from bot.engine import complete, stream_answer
 from bot.guardrails import StreamRedactor, probe_flags, redact, scrub_secrets
+from bot.knowledge_store import current_version, store, valid_name
 from bot.prompt import SUMMARY_INSTRUCTIONS, load_documentation
+from bot.sections import apply_update, unified_diff
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("app")
@@ -113,6 +116,11 @@ def _warm_up() -> None:
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/admin")
+def admin_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "admin.html")
 
 
 @app.get("/healthz")
@@ -223,3 +231,233 @@ async def summarize(req: SummaryRequest, request: Request, x_access_code: str | 
     if not text:
         raise HTTPException(status_code=503, detail="Could not update the summary right now.")
     return {"summary": _clean_summary(text)}
+
+
+# ---------------------------------------------------------------- admin: knowledge updates
+# Two roles: partners (ACCESS_CODES) can only chat; admins can also change the knowledge.
+# Admins sign in with Google (ADMIN_EMAILS); see bot/admin_auth.py. Every admin action is
+# written to the audit trail in the knowledge store (_audit/), next to the files it describes.
+
+MAX_KNOWLEDGE_CHARS = 400_000
+MAX_AUDIT_DIFF_CHARS = 20_000
+
+
+def _client_ip(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for", "")
+    return fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "")
+
+
+def _admin(request: Request) -> dict:
+    """The signed-in admin as {"admin": email or name, "method": ...}, or 401/404."""
+    if not admin_auth.enabled():
+        raise HTTPException(status_code=404, detail="Admin is not enabled on this server")
+    email = admin_auth.read_session(request.cookies.get(admin_auth.SESSION_COOKIE))
+    if admin_auth.is_admin_email(email):
+        return {"admin": email, "method": "google"}
+    email = admin_auth.iap_email(request.headers.get("x-goog-authenticated-user-email"))
+    if admin_auth.is_admin_email(email):
+        return {"admin": email, "method": "iap"}
+    code = request.headers.get("x-admin-code")
+    if code and code in config.ADMIN_CODES:
+        return {"admin": config.ADMIN_CODES[code], "method": "code"}
+    raise HTTPException(status_code=401, detail="Please sign in as an admin")
+
+
+def _audit(request: Request, event: str, who: dict | None = None, **details) -> None:
+    record = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "event": event,
+        "admin": (who or {}).get("admin"),
+        "method": (who or {}).get("method"),
+        "ip": _client_ip(request),
+        "user_agent": request.headers.get("user-agent", "")[:200],
+        **details,
+    }
+    try:
+        store().append_audit(record)
+    except Exception:
+        # The change itself succeeded; never lose the record silently.
+        log.exception("Could not write audit record: %s", record)
+
+
+def _record_last_modified(who: dict, file: str, event: str, **details) -> None:
+    """Keep only the latest change per file (shown on the admin page as "Last modified")."""
+    try:
+        store().set_last_modified(file, {"ts": datetime.now(timezone.utc).isoformat(), "event": event,
+                                         "admin": who["admin"], "method": who["method"], **details})
+    except Exception:
+        log.exception("Could not record last modification of %s", file)
+
+
+def _sha(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
+class GoogleLogin(BaseModel):
+    credential: str = Field(min_length=10, max_length=5000)
+
+
+class KnowledgeChange(BaseModel):
+    file: str
+    text: str = Field(min_length=1, max_length=MAX_KNOWLEDGE_CHARS)
+    # "section": text holds one or more sections that replace (or add to) the file's sections.
+    # "replace": text is the whole new file. "new": create a new file.
+    mode: Literal["section", "replace", "new"] = "section"
+    # Version the admin previewed against; applying fails if someone changed it since.
+    base_version: str | None = None
+    # Optional reason shown in the audit trail.
+    note: str = Field(default="", max_length=500)
+
+
+class Restore(BaseModel):
+    file: str
+    stamp: str
+    note: str = Field(default="", max_length=500)
+
+
+@app.get("/api/admin/auth-config")
+def admin_auth_config() -> dict:
+    return {
+        "enabled": admin_auth.enabled(),
+        "googleClientId": config.GOOGLE_CLIENT_ID if config.ADMIN_EMAILS else "",
+        "codesEnabled": bool(config.ADMIN_CODES),
+    }
+
+
+@app.post("/api/admin/google-login")
+def admin_google_login(body: GoogleLogin, request: Request) -> JSONResponse:
+    if not config.ADMIN_EMAILS:
+        raise HTTPException(status_code=404, detail="Google admin sign-in is not enabled")
+    try:
+        claims = admin_auth.verify_google_credential(body.credential)
+    except ValueError as e:
+        _audit(request, "login_failed", reason=str(e)[:200])
+        raise HTTPException(status_code=401, detail="Google sign-in could not be verified")
+    email = claims["email"].lower()
+    if not admin_auth.is_admin_email(email):
+        _audit(request, "login_denied", {"admin": email, "method": "google"})
+        raise HTTPException(status_code=403, detail=f"{email} is not an admin")
+    who = {"admin": email, "method": "google"}
+    _audit(request, "login", who)
+    res = JSONResponse({"admin": email, "name": claims.get("name", ""), "picture": claims.get("picture", "")})
+    secure = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+    res.set_cookie(admin_auth.SESSION_COOKIE, admin_auth.make_session(email), max_age=admin_auth.SESSION_HOURS * 3600,
+                   httponly=True, samesite="strict", secure=secure, path="/api/admin")
+    return res
+
+
+@app.post("/api/admin/logout")
+def admin_logout(request: Request) -> JSONResponse:
+    try:
+        _audit(request, "logout", _admin(request))
+    except HTTPException:
+        pass
+    res = JSONResponse({"ok": True})
+    res.delete_cookie(admin_auth.SESSION_COOKIE, path="/api/admin")
+    return res
+
+
+@app.get("/api/admin/me")
+def admin_me(request: Request) -> dict:
+    return _admin(request)
+
+
+def _plan(change: KnowledgeChange) -> tuple[str, str, list[dict]]:
+    """Work out the old text, the new text and what changes, without saving anything."""
+    if not valid_name(change.file):
+        raise HTTPException(status_code=400, detail="File name must look like 05-topic.md")
+    old = store().read(change.file)
+    if change.mode == "new":
+        if old is not None:
+            raise HTTPException(status_code=409, detail="That file already exists")
+        return "", change.text.strip() + "\n", [{"section": "(whole file)", "action": "created"}]
+    if old is None:
+        raise HTTPException(status_code=404, detail="No such knowledge file")
+    if change.mode == "replace":
+        return old, change.text.strip() + "\n", [{"section": "(whole file)", "action": "replaced"}]
+    try:
+        new, actions = apply_update(old, change.text)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return old, new, actions
+
+
+@app.get("/api/admin/files")
+def admin_files(request: Request) -> dict:
+    _admin(request)
+    s = store()
+    last = s.last_modified()
+    return {"version": current_version(force=True),
+            "files": [{"name": n, "chars": len(s.read(n) or ""),
+                       "last": {k: v for k, v in last[n].items() if k != "diff"} if n in last else None}
+                      for n in s.names()]}
+
+
+@app.get("/api/admin/files/{name}")
+def admin_file(name: str, request: Request) -> dict:
+    _admin(request)
+    text = store().read(name) if valid_name(name) else None
+    if text is None:
+        raise HTTPException(status_code=404, detail="No such knowledge file")
+    return {"name": name, "text": text, "history": store().history(name),
+            "last_modified": store().last_modified().get(name)}
+
+
+@app.post("/api/admin/preview")
+def admin_preview(change: KnowledgeChange, request: Request) -> dict:
+    _admin(request)
+    old, new, actions = _plan(change)
+    _, hits = redact(change.text)
+    return {
+        "version": current_version(force=True),
+        "actions": actions,
+        "diff": unified_diff(old, new, change.file),
+        "chars_before": len(old), "chars_after": len(new),
+        # Internal names in the update: allowed (the filter hides them from partners), but
+        # shown so the admin can rewrite them in partner terms.
+        "internal_terms": sorted(set(hits)),
+    }
+
+
+@app.post("/api/admin/apply")
+def admin_apply(change: KnowledgeChange, request: Request) -> dict:
+    who = _admin(request)
+    if change.base_version and change.base_version != current_version(force=True):
+        raise HTTPException(status_code=409, detail="The knowledge changed since your preview. Preview again.")
+    old, new, actions = _plan(change)
+    version, saved_as = store().write(change.file, new, by=who["admin"])
+    current_version(force=True)          # this instance reloads now; others within the refresh interval
+    diff = unified_diff(old, new, change.file)
+    _audit(request, "apply", who, file=change.file, mode=change.mode, note=change.note, actions=actions,
+           version=version, previous_saved_as=saved_as, sha_before=_sha(old) if old else None, sha_after=_sha(new),
+           chars_before=len(old), chars_after=len(new), diff=diff[:MAX_AUDIT_DIFF_CHARS],
+           diff_truncated=len(diff) > MAX_AUDIT_DIFF_CHARS)
+    _record_last_modified(who, change.file, "apply", mode=change.mode, note=change.note, actions=actions,
+                          version=version, diff=diff[:MAX_AUDIT_DIFF_CHARS])
+    log.info("Knowledge %s updated by %s (%s): %s", change.file, who["admin"], change.mode, actions)
+    return {"ok": True, "version": version, "actions": actions}
+
+
+@app.post("/api/admin/restore")
+def admin_restore(req: Restore, request: Request) -> dict:
+    who = _admin(request)
+    text = store().read_history(req.file, req.stamp) if valid_name(req.file) else None
+    if text is None:
+        raise HTTPException(status_code=404, detail="No such saved version")
+    old = store().read(req.file) or ""
+    version, saved_as = store().write(req.file, text, by=who["admin"])
+    current_version(force=True)
+    diff = unified_diff(old, text, req.file)
+    _audit(request, "restore", who, file=req.file, note=req.note, restored=req.stamp, version=version,
+           previous_saved_as=saved_as, sha_before=_sha(old), sha_after=_sha(text),
+           chars_before=len(old), chars_after=len(text), diff=diff[:MAX_AUDIT_DIFF_CHARS],
+           diff_truncated=len(diff) > MAX_AUDIT_DIFF_CHARS)
+    _record_last_modified(who, req.file, "restore", note=req.note, restored=req.stamp, version=version,
+                          diff=diff[:MAX_AUDIT_DIFF_CHARS])
+    return {"ok": True, "version": version}
+
+
+@app.get("/api/admin/audit")
+def admin_audit(request: Request, limit: int = 100) -> dict:
+    _admin(request)
+    return {"events": store().read_audit(max(1, min(limit, 500)))}

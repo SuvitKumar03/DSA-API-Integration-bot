@@ -11,6 +11,13 @@ load_dotenv(ROOT_DIR / ".env")
 KNOWLEDGE_DIR = Path(os.getenv("KNOWLEDGE_DIR", ROOT_DIR / "knowledge"))
 LOG_DIR = Path(os.getenv("LOG_DIR", ROOT_DIR / "logs"))
 
+# Where the knowledge files live: "local" (KNOWLEDGE_DIR) or "gcs" (a Cloud Storage bucket).
+KNOWLEDGE_BACKEND = os.getenv("KNOWLEDGE_BACKEND", "local").strip().lower()
+KNOWLEDGE_BUCKET = os.getenv("KNOWLEDGE_BUCKET", "")
+KNOWLEDGE_PREFIX = os.getenv("KNOWLEDGE_PREFIX", "knowledge/")
+# How often each running instance checks whether an admin changed the knowledge.
+KNOWLEDGE_REFRESH_SECONDS = int(os.getenv("KNOWLEDGE_REFRESH_SECONDS", "60"))
+
 # "anthropic" = Claude API. "openai_compatible" = any OpenAI-compatible endpoint
 # (Gemini, Groq, OpenRouter, Mistral, a local Ollama server, ...).
 PROVIDER = os.getenv("PROVIDER", "anthropic").strip().lower()
@@ -42,6 +49,22 @@ for _pair in os.getenv("ACCESS_CODES", "").split(","):
     if ":" in _pair:
         _partner, _code = _pair.split(":", 1)
         ACCESS_CODES[_code.strip()] = _partner.strip()
+
+# Admins sign in to /admin with Google. Only these emails are admins (comma separated).
+ADMIN_EMAILS = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
+# OAuth "Web application" client ID from Google Cloud console (Credentials).
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+# Signs admin session cookies. Set a long random value in production.
+ADMIN_SESSION_SECRET = os.getenv("ADMIN_SESSION_SECRET", "")
+# true only when the app is reachable solely through Google IAP (Cloud Run).
+TRUST_IAP = os.getenv("TRUST_IAP", "false").lower() == "true"
+
+# Local-development fallback: admin codes as "name:code" pairs. Leave empty in production.
+ADMIN_CODES: dict[str, str] = {}
+for _pair in os.getenv("ADMIN_CODES", "").split(","):
+    if ":" in _pair:
+        _name, _code = _pair.split(":", 1)
+        ADMIN_CODES[_code.strip()] = _name.strip()
 
 RATE_LIMIT_PER_HOUR = int(os.getenv("RATE_LIMIT_PER_HOUR", "60"))
 MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "20"))

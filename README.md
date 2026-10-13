@@ -4,44 +4,282 @@ A chatbot that answers B2B partners' integration questions using the Thyrocare p
 
 > **Status.** The code in this repo is the single-team pilot, built for the DSA partner team. The sections up to [Reviewing answers](#reviewing-answers) describe that pilot as it runs today. The [v0 Platform Plan](#v0-platform-plan) describes the agreed change of scope: one platform that any team in the org (DSA, Lab, ...) can use, with an admin panel, activity tracking, rate limiting, a choice of AI provider with the team's own key, automated email monitoring, and a knowledge base that keeps learning from past and new partner conversations. All requirements are listed in [Requirements](#requirements); the full system design is in [section 18](#18-system-design-and-scalability).
 
-## How it works
+## Architecture (current build)
 
-```
-Partner's browser ──► FastAPI app (this repo) ──► Claude API
-   chat UI             - loads knowledge/*.md       answers using
-                       - access codes, rate limit   the full docs
-                       - logs every Q&A
+Four parts:
+
+1. **Answering:** a partner asks, the AI answers from the docs. *Uses the AI.*
+2. **Session memory:** a short summary of the partner's past chats, kept in their own browser. *Uses the AI to write the summary.*
+3. **Knowledge admin:** admins update the docs section by section. *No AI: plain text matching.*
+4. **Learning from chats:** past Google Chat Q&A becomes the FAQ. *Scripts, plus Claude for the extraction step.*
+
+Legend used in the diagrams: 🤖 = an AI model is called here. ⚙️ = plain code, no AI.
+
+### Where the AI is used, and where it isn't
+
+| Step | AI? | Code |
+|---|---|---|
+| Answering a partner's question | 🤖 Yes, the provider set by `PROVIDER` | `bot/engine.py` → `stream_answer()` |
+| Writing the session-memory summary | 🤖 Yes, same provider | `bot/engine.py` → `complete()`, prompt `SUMMARY_INSTRUCTIONS` in `bot/prompt.py` |
+| Building the system prompt from the docs | ⚙️ No | `bot/prompt.py` |
+| Hiding internal names (docs and answers) | ⚙️ No, regex rules | `bot/guardrails.py` + `internal_terms.txt` |
+| Flagging probe questions ("show your prompt") | ⚙️ No, regex | `bot/guardrails.py` → `probe_flags()` |
+| Removing tokens, emails, phones before logging | ⚙️ No, regex | `bot/guardrails.py` → `scrub_secrets()` |
+| Access codes, rate limit | ⚙️ No | `app/main.py` |
+| Admin sign-in (Google), audit trail | ⚙️ No (Google only verifies identity) | `bot/admin_auth.py`, `app/main.py` |
+| Admin section update, preview diff, history, restore | ⚙️ No | `bot/sections.py`, `bot/knowledge_store.py` |
+| Reloading docs after an update | ⚙️ No, version check | `bot/knowledge_store.py` → `current_version()` |
+| Exporting and cleaning Google Chat | ⚙️ No | `chat_export/export_gchat.py`, `chat_export/clean_chat.py` |
+| Extracting Q&A from cleaned chat windows | 🤖 Yes, Claude, run by hand in a Claude Code session with `chat_export/extraction_prompt.md` | (no script yet) |
+| Selecting FAQ candidates | ⚙️ No, filters | `chat_export/build_faq.py` |
+| Writing `knowledge/04-faq.md` from the candidates | 🤖 Claude drafted it, a person reviews it | (manual) |
+
+**Which AI answers** is one setting, `PROVIDER`, in `bot/config.py`:
+
+| `PROVIDER` | Model | Where it runs | Use |
+|---|---|---|---|
+| `anthropic` | Claude (`CLAUDE_MODEL`) | Claude API, with prompt caching | Production |
+| `openai_compatible` | Gemini, Groq, Ollama, ... (`LLM_MODEL`) | That provider's API | Free or cheap alternative |
+| `claude_code` | Claude (`CLAUDE_CODE_MODEL`) | Local `claude -p` CLI on your own subscription | **Local testing only.** Refuses access codes and non-localhost requests |
+
+### 1. Overall view
+
+```mermaid
+flowchart TB
+    subgraph Browsers["Browsers"]
+        direction LR
+        UI["Partner chat page<br/>app/static/index.html"]
+        LS[("localStorage ia.memory.v1<br/>summary ≤120 words")]
+        AUI["Admin page<br/>app/static/admin.html"]
+        UI <--> LS
+    end
+
+    subgraph Server["FastAPI server: app/main.py<br/>⚙️ partner access codes · Google admin sign-in · rate limit · logging · audit"]
+        direction LR
+        CHAT["/api/chat"]
+        SUM["/api/summarize"]
+        FB["/api/feedback"]
+        ADM["/api/admin/*<br/>files · preview · apply · restore"]
+    end
+
+    subgraph Bot["bot/  (settings from .env via config.py)"]
+        direction LR
+        GUARD["⚙️ guardrails.py<br/>sanitise docs · filter answers<br/>probe flags · scrub secrets"]
+        PROMPT["⚙️ prompt.py<br/>instructions + docs + memory"]
+        ENGINE["engine.py<br/>provider switch"]
+        SECT["⚙️ sections.py<br/>section merge + diff"]
+        STORE["⚙️ knowledge_store.py<br/>read/write · history · version"]
+    end
+
+    subgraph Data["Files and storage"]
+        direction LR
+        TERMS[("internal_terms.txt<br/>git-ignored")]
+        KN[("knowledge/*.md<br/>or GCS bucket")]
+        LOGS[("logs/<br/>chats · feedback")]
+        AUD[("_audit/<br/>admin audit trail")]
+    end
+
+    subgraph AI["🤖 AI provider: one, chosen by PROVIDER"]
+        direction LR
+        CLAUDE["Claude API"]
+        OAI["Gemini / Groq / Ollama"]
+        CC["Local Claude Code CLI<br/>testing only"]
+    end
+
+    UI -- "question + history + summary" --> CHAT
+    UI -- "new messages + old summary" --> SUM
+    UI -- "👍 / 👎" --> FB
+    AUI -- "Google sign-in → session cookie" --> ADM
+
+    CHAT --> PROMPT
+    PROMPT --> STORE
+    PROMPT --> ENGINE
+    SUM --> ENGINE
+    ENGINE --> AI
+    AI -- "answer stream" --> GUARD
+    GUARD -- "filtered answer" --> UI
+    SUM -. "summary, not stored" .-> UI
+    ADM --> SECT --> STORE
+    ADM --> AUD
+    STORE --> KN
+    GUARD --> TERMS
+    Server --> LOGS
 ```
 
-- The documentation lives as Markdown in [knowledge/](knowledge/). The whole set goes into the system prompt on every request, with prompt caching so repeat questions are cheap.
-- No database, no vector store, no fine-tuning. To update what the bot knows, edit the Markdown and redeploy.
-- `knowledge/03-known-gaps.md` lists unclear or inconsistent points in the docs. The bot tells partners these need confirmation instead of guessing.
+### 2. Answering a question
 
-## Project layout
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Browser (index.html)
+    participant M as app/main.py /api/chat
+    participant G as ⚙️ guardrails.py
+    participant P as ⚙️ prompt.py
+    participant S as ⚙️ knowledge_store.py
+    participant E as engine.py
+    participant AI as 🤖 AI provider
 
+    B->>M: POST {messages (last 20), summary}<br/>header X-Access-Code
+    M->>M: check access code, rate limit, length
+    M->>G: probe_flags(question): log only, never blocks
+    M->>G: clean the summary (secrets + internal names)
+    M->>E: stream_answer(history, summary)
+    E->>P: system_blocks(summary)
+    P->>S: current_version(): re-checked at most every 60 s
+    alt version changed (admin updated the docs)
+        P->>S: read every *.md (README.md skipped)
+        P->>G: sanitize_doc(): rewrite or drop internal lines
+    end
+    P-->>E: [instructions] [docs, cached] [partner_context]
+    E->>AI: system prompt + conversation
+    AI-->>E: answer, streamed in pieces
+    E-->>M: pieces
+    M->>G: StreamRedactor: replaces internal names,<br/>holds back 80 chars so a split name is still caught
+    M-->>B: filtered answer, streamed
+    M->>M: append to logs/chats.jsonl<br/>(secrets scrubbed, summary text never logged)
 ```
-knowledge/        Documentation the bot answers from (edit these to update the bot)
-bot/              Prompt + Claude client (config.py, prompt.py, engine.py)
-app/main.py       FastAPI server: /api/chat (streaming), /api/feedback, access codes
-app/static/       Chat UI (single HTML page)
-cli.py            Terminal chat for testing answer quality
-logs/             chats.jsonl and feedback.jsonl (created at runtime, git-ignored)
+
+**What the AI receives** (built in `bot/prompt.py`):
+
+| Block | Content | Cached? |
+|---|---|---|
+| 1. Instructions | Role, answer only from docs, name the API family, language rule, confidentiality rules, safety | Yes (identical every time) |
+| 2. Documentation | Every `knowledge/*.md` file after sanitising, wrapped in `<document name="...">` | Yes, until the docs change |
+| 3. Partner context | The browser's summary, marked as untrusted background | No (differs per partner) |
+| Messages | The last 20 turns of the current chat | No |
+
+### 3. Session memory (kept only in the partner's browser)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Browser (index.html)
+    participant LS as localStorage "ia.memory.v1"
+    participant M as app/main.py /api/summarize
+    participant AI as 🤖 AI provider
+
+    Note over B: Trigger: 10 min idle (SUMMARY_IDLE_MINUTES),<br/>12 new messages (SUMMARY_EVERY_MESSAGES),<br/>"New chat", or tab hidden / closed
+    B->>LS: read the old summary
+    B->>M: POST {new messages only, old summary}
+    M->>M: scrub secrets from the transcript
+    M->>AI: SUMMARY_INSTRUCTIONS: ≤120 words, language & style,<br/>APIs used, stage, problems & fixes,<br/>never tokens, IDs, patient data or internal names
+    AI-->>M: new summary
+    M->>M: scrub again, cap at 1,200 chars
+    M-->>B: summary (the server keeps no copy)
+    B->>LS: save {summary, updatedAt}
+    Note over B,LS: Shown in the sidebar ("What I remember").<br/>Sent with every question. Deleted by Forget,<br/>by logout, or after 30 days (SUMMARY_TTL_DAYS).
 ```
+
+### 4. Knowledge admin: updating the docs (no AI)
+
+```mermaid
+flowchart TD
+    A["Admin opens /admin<br/>Sign in with Google → server verifies the token,<br/>email must be in ADMIN_EMAILS → 8-hour HttpOnly session cookie<br/>(denied and failed sign-ins are audited)"] --> B["Picks a file, e.g. 04-faq.md"]
+    B --> C{"Mode"}
+    C -- "Update sections" --> D["Pastes sections, each starting with a heading<br/>e.g. ## Reports"]
+    C -- "Replace whole file" --> E["Pastes the full file"]
+    C -- "New file" --> F["Name like 05-topic.md + content"]
+    D & E & F --> G["Preview: POST /api/admin/preview"]
+    G --> H["⚙️ sections.py apply_update()<br/>1. split the paste at headings of the first heading's level<br/>2. match each title (case, numbering, ** ignored; code blocks skipped)<br/>3. found: replace up to the next heading of same or higher level<br/>4. not found: add at the end of the file"]
+    H --> I["⚙️ Red/green diff (difflib)<br/>+ warning if internal names are found"]
+    I --> J{"Admin clicks Apply"}
+    J --> K["POST /api/admin/apply<br/>rejected if someone changed the file since the preview"]
+    K --> L["⚙️ knowledge_store.py write()<br/>1. old file to _history/name/timestamp.md<br/>2. write the new file<br/>3. bump _version.json"]
+    L --> AU["⚙️ Audit record in _audit/<br/>who, method, IP, time, file, sections,<br/>reason, before/after hash, full diff"]
+    L --> M["Every server instance sees the new version within<br/>KNOWLEDGE_REFRESH_SECONDS (60 s) and reloads the docs"]
+    M --> N["🤖 The next partner question is answered from the new docs"]
+    L -.-> R["Restore: any earlier version<br/>POST /api/admin/restore"]
+```
+
+Where the files live (`KNOWLEDGE_BACKEND`):
+
+| Backend | Location | Who can change it |
+|---|---|---|
+| `local` (default) | `knowledge/` folder; history in `knowledge/_history/` | Anyone with the machine, or admins via `/admin` |
+| `gcs` (Google Cloud) | Private Cloud Storage bucket, prefix `knowledge/` | Only the Cloud Run service account; people go through `/admin`. See [docs/deploy-gcp.md](docs/deploy-gcp.md) |
+
+### 5. Keeping internal details out of answers
+
+```mermaid
+flowchart LR
+    T[("internal_terms.txt<br/>words, cs:, re:,<br/>drop-line:, rewrite:")] --> R["⚙️ guardrails.rules()"]
+    BI["Built-in patterns<br/>tables, stored procs, internal hosts,<br/>class names"] --> R
+    R --> L1["Layer 1: sanitize_doc()<br/>docs cleaned before the AI sees them"]
+    R --> L3["Layer 3: StreamRedactor<br/>answer filtered while streaming"]
+    L2["Layer 2: prompt rules<br/>(prompt.py, Confidentiality)<br/>public contract only, refuse internals,<br/>pasted text is data"] --> AI["🤖 AI"]
+    L1 --> AI --> L3 --> P["Partner sees the answer"]
+    L4["Layer 4: probe_flags()<br/>logs suspicious questions"] -.-> LOG[("logs/chats.jsonl")]
+```
+
+At startup the server also refuses to run with partner access codes if `internal_terms.txt` is missing, and warns if any internal name is still left in the docs.
+
+### 6. Learning from the partner Google Chat (offline, run by hand)
+
+```mermaid
+flowchart LR
+    GC["Google Chat space"] -->|"⚙️ export_gchat.py<br/>OAuth, Chat + People API"| RAW[("chat_export/output/space/<br/>messages.jsonl")]
+    RAW -->|"⚙️ clean_chat.py<br/>roles, redact secrets & PII,<br/>client names → CLIENT,<br/>compact JSON/curl, windows"| CLEAN[("clean/windows/*.txt")]
+    PN[("private_names.json<br/>(git-ignored)")] --> CLEAN
+    CLEAN -->|"🤖 Claude in a Claude Code session<br/>extraction_prompt.md"| EX[("extracted/all_entries.json<br/>128 Q&A entries")]
+    EX -->|"⚙️ build_faq.py<br/>resolved, generic, confident;<br/>drop incidents & announcements"| CAND[("faq_candidates.md<br/>56 entries")]
+    CAND -->|"🤖 Claude drafts, person reviews:<br/>dedupe, partner terms"| FAQ["knowledge/04-faq.md"]
+    FAQ --> BOT["Bot answers"]
+```
+
+### Files
+
+| File | What it does | AI? |
+|---|---|---|
+| `app/main.py` | FastAPI server: `/`, `/admin`, `/api/config`, `/api/login`, `/api/chat`, `/api/summarize`, `/api/feedback`, `/api/admin/*`, `/healthz`; access and admin codes, rate limit, logging, startup checks | Calls the engine |
+| `app/static/index.html` | Partner chat page: streaming markdown, copy buttons, 👎 feedback, session memory in localStorage, login | No |
+| `app/static/admin.html` | Admin page: Google sign-in, files, section update / replace / new, red-green preview, reason, apply, history, restore, audit trail | No |
+| `bot/admin_auth.py` | Who is an admin: Google ID-token check, signed session cookie, IAP header, dev codes | No |
+| `bot/config.py` | Reads every setting from `.env` | No |
+| `bot/prompt.py` | Instructions, docs block (reloaded on version change), partner-context block, summary instructions | No (builds the prompt) |
+| `bot/engine.py` | Talks to the chosen provider: `stream_answer()` for answers, `complete()` for summaries | 🤖 Yes |
+| `bot/guardrails.py` | Internal-name rules, doc sanitising, streaming answer filter, secret scrubbing, probe flags | No |
+| `bot/knowledge_store.py` | Reads and writes the knowledge (local folder or GCS), history, version, audit trail | No |
+| `bot/sections.py` | Section matching and merge, diff | No |
+| `cli.py` | Terminal chat for testing answers | 🤖 Yes, via the engine |
+| `knowledge/*.md` | The docs the bot answers from (git-ignored, not public) | Read by the AI |
+| `internal_terms.txt` | Names the bot must never reveal (git-ignored); `internal_terms.example.txt` shows the syntax | No |
+| `chat_export/export_gchat.py` | Exports a Google Chat space | No |
+| `chat_export/clean_chat.py` | Cleans and redacts the export into transcript windows | No |
+| `chat_export/extraction_prompt.md` | Instructions for the AI step that pulls Q&A out of the windows | Used with 🤖 |
+| `chat_export/build_faq.py` | Picks publishable FAQ candidates | No |
+| `docs/deploy-gcp.md` | Google Cloud deployment (Cloud Run, bucket, Secret Manager, IAP) | No |
+| `logs/` | `chats.jsonl`, `feedback.jsonl` (git-ignored) | No |
+
+### What is stored where
+
+| Data | Where | Kept for |
+|---|---|---|
+| Partner's session summary | Partner's browser only (`localStorage`, key `ia.memory.v1`) | 30 days, or until Forget / logout |
+| Current chat | Browser memory only (gone on reload) | The open page |
+| Questions and answers | `logs/chats.jsonl` on the server, secrets scrubbed | Until deleted |
+| Feedback | `logs/feedback.jsonl` | Until deleted |
+| Admin audit trail (sign-ins, changes with diffs and reasons) | `_audit/` next to the knowledge (local folder or GCS bucket), one file per month locally | Kept (append-only) |
+| Last modification of each file (who, when, reason, exact diff) | `_last_modified.json` next to the knowledge | Only the latest change per file; overwritten on every update |
+| Old versions of each file | `_history/` next to the knowledge | All versions (no limit yet) |
+| Docs | `knowledge/` or the GCS bucket | Live |
+| API keys, codes | `.env` locally; Secret Manager on Google Cloud | n/a |
 
 ## Run locally
 
-Requires Python 3.10+.
+**Step-by-step guide for teammates: [docs/LOCAL_SETUP.md](docs/LOCAL_SETUP.md)** (private files, AI key, `.env`, admin sign-in, troubleshooting).
+
+Short version (Python 3.10+):
 
 ```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
+git checkout feature/partner-assistant
+unzip private-files.zip                     # docs + internal terms, shared privately (not in the repo)
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-
-cp .env.example .env        # then set ANTHROPIC_API_KEY
-
-python cli.py "How do I create a lead?"     # quick test in terminal
-uvicorn app.main:app --reload               # web UI at http://localhost:8000
+cp .env.example .env                        # then choose PROVIDER and add your AI key
+uvicorn app.main:app --port 8000            # open http://localhost:8000
 ```
+
+To share the private files with a teammate: `scripts/pack-private.sh` creates `private-files.zip`.
 
 ## Configuration (.env)
 
@@ -57,6 +295,15 @@ uvicorn app.main:app --reload               # web UI at http://localhost:8000
 | `SUPPORT_CONTACT` | the Thyrocare integration team | Where the bot sends partners when it can't answer |
 | `ACCESS_CODES` | empty (no login) | `partner:code` pairs, comma separated. **Set this before sharing the URL.** |
 | `RATE_LIMIT_PER_HOUR` | `60` | Questions per partner per hour |
+| `ADMIN_EMAILS` | empty (admin off) | Google accounts that are admins, comma separated |
+| `GOOGLE_CLIENT_ID` | — | OAuth Web client ID for "Sign in with Google" on `/admin` |
+| `ADMIN_SESSION_SECRET` | random per start | Signs admin session cookies; set a fixed long value in production |
+| `TRUST_IAP` | `false` | `true` only when the app is reachable solely through Google IAP |
+| `ADMIN_CODES` | empty | Local-development fallback admin codes (`name:code`); leave empty in production |
+| `KNOWLEDGE_BACKEND` | `local` | `local` (`knowledge/` folder) or `gcs` (Cloud Storage bucket, with `KNOWLEDGE_BUCKET`, `KNOWLEDGE_PREFIX`) |
+| `KNOWLEDGE_REFRESH_SECONDS` | `60` | How often each instance checks for updated docs |
+| `INTERNAL_TERMS_FILE` | `internal_terms.txt` | Internal names to hide; required when `ACCESS_CODES` is set |
+| `SUMMARY_IDLE_MINUTES`, `SUMMARY_EVERY_MESSAGES`, `SUMMARY_TTL_DAYS` | `10`, `12`, `30` | When the browser memory is summarised, and when it expires |
 
 ## Deploy
 
@@ -69,7 +316,9 @@ docker run -p 8000:8000 --env-file .env integration-bot
 
 **Render / Railway (quick pilot):** connect this GitHub repo, choose "Docker", and set the environment variables (`ANTHROPIC_API_KEY`, `ACCESS_CODES`, ...) in the dashboard. Health check path: `/healthz`.
 
-**AWS (production):** push the image to ECR and run it on ECS Fargate or App Runner behind HTTPS, with the API key in Secrets Manager.
+**Google Cloud (planned):** Cloud Run + a private Cloud Storage bucket for the docs + Secret Manager + IAP for admins. See [docs/deploy-gcp.md](docs/deploy-gcp.md).
+
+**AWS (alternative):** push the image to ECR and run it on ECS Fargate or App Runner behind HTTPS, with the API key in Secrets Manager.
 
 Notes:
 - Chat logs are written to `logs/` inside the container. On most hosts this is lost on redeploy; mount a volume, or move logs to a database when you need them long-term.
@@ -80,7 +329,7 @@ Notes:
 - `logs/chats.jsonl`: every question, answer, partner, latency and token usage.
 - `logs/feedback.jsonl`: 👍/👎 from partners, with optional comments.
 
-Review the 👎 answers regularly. Fix the gap in `knowledge/` (or add to `03-known-gaps.md`) and redeploy.
+Review the 👎 answers regularly. Fix the gap in the docs through `/admin` (or add it to `03-known-gaps.md`); the bot picks it up within a minute, no redeploy needed.
 
 ---
 
@@ -509,7 +758,7 @@ sequenceDiagram
     A->>DB: Save question, answer, tokens, cost, knowledge version
     A->>Q: Enqueue answer check
     Q->>AI: Small model labels the answer
-    Q->>DB: Save label; feeds gaps and alerts
+    Q->>DB: Save label, feeds gaps and alerts
 ```
 
 - The knowledge version (layers 1–4) is loaded from the database once and kept in memory per instance; a publish clears it through Redis pub/sub ([9](#9-architecture-for-scale)).

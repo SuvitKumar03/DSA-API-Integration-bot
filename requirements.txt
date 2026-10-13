@@ -3,3 +3,6 @@ openai>=1.40
 fastapi>=0.115
 uvicorn[standard]>=0.30
 python-dotenv>=1.0
+google-auth>=2.20             # admin "Sign in with Google"
+requests>=2.31
+google-cloud-storage>=2.10    # only for KNOWLEDGE_BACKEND=gcs

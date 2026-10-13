@@ -243,3 +243,6 @@ knowledge/*
 
 # Internal notes (security findings, drafts for other teams)
 notes/
+
+# Private files bundle for teammates (scripts/pack-private.sh)
+private-files*.zip

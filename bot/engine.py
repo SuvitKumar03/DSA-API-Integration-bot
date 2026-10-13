@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 import anthropic
 
 from bot import config
-from bot.prompt import context_block, system_blocks
+from bot.prompt import context_block, docs_version, system_blocks
 
 log = logging.getLogger(__name__)
 
@@ -132,19 +132,22 @@ async def _stream_openai_compatible(messages: list[dict], usage_out: dict | None
 # ---------------------------------------------------------------- local Claude Code CLI (personal testing only)
 
 _cc_workdir = None
+_cc_version = None
 _API_AUTH_VARS = {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"}
 
 
 def _claude_code_workdir():
     """Empty temp dir holding the system prompt, so the CLI loads no project settings."""
-    global _cc_workdir
+    global _cc_workdir, _cc_version
     if _cc_workdir is None:
         import tempfile
         from pathlib import Path
 
         _cc_workdir = Path(tempfile.mkdtemp(prefix="integration-bot-"))
-        (_cc_workdir / "system.txt").write_text(
-            "\n\n".join(block["text"] for block in system_blocks()), encoding="utf-8")
+    blocks = system_blocks()           # reloads the docs if an admin updated them
+    if _cc_version != docs_version():
+        (_cc_workdir / "system.txt").write_text("\n\n".join(b["text"] for b in blocks), encoding="utf-8")
+        _cc_version = docs_version()
     return _cc_workdir
 
 

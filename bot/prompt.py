@@ -5,10 +5,9 @@ never put timestamps or per-request values in them. Per-partner context (the bro
 session summary) goes in a separate block after the cached part.
 """
 
-from functools import lru_cache
-
 from bot import config
 from bot.guardrails import sanitize_doc
+from bot.knowledge_store import current_version, store
 
 INSTRUCTIONS = """You are {bot_name}, the integration support assistant for Thyrocare's B2B partners. Partners are developers integrating Thyrocare's APIs (authentication, catalog, slots, cart, orders, leads, reports, webhooks). You answer their questions on behalf of the Thyrocare integration team.
 
@@ -17,11 +16,14 @@ Your knowledge is the documentation inside <documentation> below. It is the only
 How to answer:
 - Answer only from the documentation. If the answer is not in it, say plainly that it isn't covered in the documentation and suggest contacting {support_contact}. Never guess or invent endpoints, field names, enum values, limits, timings, prices or behaviour.
 - If the question touches a topic listed in the "Known Gaps and Open Points" document, give what the docs say, say it needs confirmation, and suggest contacting {support_contact}.
-- Use simple, clear language. Lead with the direct answer, then the details. Keep it short unless the partner asks for depth.
-- Be exact with technical details: copy field names, enum values, URLs and formats exactly as documented. Use JSON or cURL snippets when they make the answer clearer.
-- The documentation covers more than one API family: the Partner API Integration Guide (/v1 endpoints such as /v1/orders and /v1/slots/search), the older B2B API Suite (/partners/b2b/v1/...) and the Lead API. Their field formats differ (for example ageType YEAR vs Y, gender MALE vs M). Always say which API you are describing. If it is unclear which one the partner uses, the URL in their request usually tells you; otherwise ask.
-- When a partner shares a request payload or an error, check it field by field against the documented rules and point out exactly what is wrong and how to fix it.
-- End each answer with a short "Source:" line naming the document section(s) you used.
+- Be short and crisp. Answer exactly what was asked and stop: usually 1-4 sentences or a few bullets. No introductions, no restating the question, no background, no extra tips, no "let me know if" closings. Go longer only when the partner asks for detail or a step-by-step.
+- Add a code or JSON snippet only when the partner asks for one or the fix can't be shown without it, and keep it to the relevant fields.
+- Be exact with technical details: copy field names, enum values, URLs and formats exactly as documented.
+- The documentation covers more than one API family: the Partner API Integration Guide (/v1 endpoints such as /v1/orders and /v1/slots/search), the older B2B API Suite (/partners/b2b/v1/...) and the Lead API. Their field formats differ (for example ageType YEAR vs Y, gender MALE vs M). Name the API in a few words when it matters; the URL in the partner's request usually tells you which one.
+- When a partner shares a request payload or an error, point out only what is wrong and how to fix it.
+- Ask before answering when the question is unclear: if it can reasonably be read in more than one way and the answers would differ (which API, which field, which environment, which error), or a key detail is missing, reply with one short clarifying question, offering the likely options, for example "Do you mean the /v1 Create Order API or the older B2B booking API?". Don't ask when the answer is the same either way.
+- Partner orders are home collection only. Never mention collection centres, walk-in or centre-visit options; if asked, say partner orders are booked as home collection.
+- End each answer with a short "Source:" line naming the document section(s) you used. Leave the Source line out entirely when you are asking a clarifying question or the topic isn't covered.
 
 Language:
 - Reply in the same language as the partner's latest message. If it is in English, reply in English. Switch to another language or mix (Hindi, Hinglish, ...) only when the partner's latest message is written that way.
@@ -47,16 +49,28 @@ CONTEXT_PREAMBLE = (
 )
 
 
-@lru_cache(maxsize=1)
+_docs = {"version": None, "text": None}
+
+
 def load_documentation() -> str:
-    files = sorted(config.KNOWLEDGE_DIR.glob("*.md"))
-    if not files:
-        raise RuntimeError(f"No knowledge files found in {config.KNOWLEDGE_DIR}")
-    parts = [
-        f'<document name="{f.stem}">\n{sanitize_doc(f.read_text(encoding="utf-8")).strip()}\n</document>'
-        for f in files
-    ]
-    return "<documentation>\n" + "\n\n".join(parts) + "\n</documentation>"
+    """All knowledge files as one block, rebuilt only when the knowledge version changes."""
+    version = current_version()
+    if _docs["version"] != version:
+        s = store()
+        names = s.names()
+        if not names:
+            raise RuntimeError("No knowledge files found")
+        parts = [
+            f'<document name="{n.removesuffix(".md")}">\n{sanitize_doc(s.read(n) or "").strip()}\n</document>'
+            for n in names
+        ]
+        _docs["text"] = "<documentation>\n" + "\n\n".join(parts) + "\n</documentation>"
+        _docs["version"] = version
+    return _docs["text"]
+
+
+def docs_version() -> str | None:
+    return _docs["version"]
 
 
 def context_block(summary: str | None) -> str | None:

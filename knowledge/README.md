@@ -17,5 +17,7 @@ Get the current set from the integration team. Files load in name order:
 Rules for this folder:
 - Partner-facing content only. Internal-only material (architecture notes, runbooks,
   service names) does not belong here, even with the filter in place.
+- Admins update files at `/admin` (preview, apply, restore). Each change keeps the old
+  file in `_history/` and bumps `_version.json`; the bot reloads within a minute.
 - Internal names that still appear in a file are removed or rewritten at load time by the
   rules in `internal_terms.txt`; the server logs a warning at startup if any remain.

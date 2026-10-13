@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Knowledge Admin</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f5f7fb; --surface: #fff; --surface-2: #f8fafc; --ink: #0f1b2d; --ink-2: #334155;
+    --muted: #64748b; --border: #e2e8f0; --accent: #2f5bea; --accent-hover: #2449c7;
+    --accent-soft: #eef2ff; --teal: #0d9488; --teal-soft: #e6f6f4; --danger: #c0362c;
+    --danger-soft: #fdecea; --warn: #9a6700; --warn-soft: #fff8e1;
+    --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(--font); }
+  header { display: flex; align-items: center; gap: 10px; padding: 14px 24px; background: var(--surface);
+           border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 16px; margin: 0; }
+  header .who { margin-left: auto; color: var(--muted); font-size: 13px; }
+  .badge { font-size: 11px; font-weight: 600; color: var(--accent); background: var(--accent-soft);
+           padding: 2px 8px; border-radius: 99px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 60px; display: grid; gap: 16px;
+         grid-template-columns: 260px 1fr; }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 10px; }
+  .files button { display: flex; justify-content: space-between; width: 100%; text-align: left; border: 0;
+                  background: none; padding: 8px 10px; border-radius: 8px; font: inherit; color: var(--ink-2); cursor: pointer; }
+  .files button:hover { background: var(--surface-2); }
+  .files button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .files button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .files small { color: var(--muted); font-weight: 400; flex: none; margin-left: 8px; }
+  .modes { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .modes label { border: 1px solid var(--border); border-radius: 99px; padding: 5px 12px; cursor: pointer; font-size: 13px; }
+  .modes input { display: none; }
+  .modes label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+  .hint { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+  input[type=text], input[type=password], textarea { width: 100%; border: 1px solid var(--border); border-radius: 10px;
+         padding: 10px 12px; font: inherit; background: var(--surface); color: var(--ink); }
+  textarea { font: 13px/1.5 var(--mono); min-height: 260px; resize: vertical; }
+  .row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  button.btn { border: 1px solid var(--border); background: var(--surface); border-radius: 10px; padding: 8px 16px;
+               font: 600 13px var(--font); cursor: pointer; color: var(--ink-2); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { background: var(--accent-hover); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .actions li { margin: 2px 0; }
+  .tag { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 99px; background: var(--teal-soft); color: var(--teal); }
+  .tag.added, .tag.created { background: var(--accent-soft); color: var(--accent); }
+  .warn { background: var(--warn-soft); color: var(--warn); border-radius: 10px; padding: 10px 12px; margin: 10px 0; font-size: 13px; }
+  .err { background: var(--danger-soft); color: var(--danger); border-radius: 10px; padding: 10px 12px; margin: 10px 0; font-size: 13px; }
+  .ok { background: var(--teal-soft); color: var(--teal); border-radius: 10px; padding: 10px 12px; margin: 10px 0; font-size: 13px; }
+  pre.diff { font: 12px/1.5 var(--mono); background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+             padding: 10px; overflow: auto; max-height: 420px; margin: 10px 0 0; white-space: pre; }
+  .diff span { display: block; }
+  .diff .add { color: #116329; background: #e6ffec; }
+  .diff .del { color: #82071e; background: #ffebe9; }
+  .diff .hunk { color: var(--accent); }
+  .history li { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; font-size: 13px; }
+  .login { max-width: 360px; margin: 12vh auto; }
+  [hidden] { display: none !important; }
+  #googleBtn { min-height: 44px; }
+  .last { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
+          margin: 0 0 12px; font-size: 13px; color: var(--ink-2); }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--border); padding: 6px 8px; white-space: nowrap; }
+  td { border-bottom: 1px solid var(--border); padding: 6px 8px; vertical-align: top; }
+  td.ev { font-weight: 600; white-space: nowrap; }
+  td.ev.login_denied, td.ev.login_failed { color: var(--danger); }
+</style>
+</head>
+<body>
+
+<div class="card login" id="login">
+  <h2>Knowledge admin</h2>
+  <p class="hint">Only admins can change what the assistant knows. Sign in with your work Google account.</p>
+  <div id="googleBtn"></div>
+  <p class="hint" id="googleOff" hidden>Google sign-in is not configured on this server (GOOGLE_CLIENT_ID and ADMIN_EMAILS).</p>
+  <form id="loginForm" hidden><p class="hint" style="margin-top:14px">Local development: admin code</p>
+    <input type="password" id="code" placeholder="Admin code" autocomplete="current-password">
+    <div class="row"><button class="btn">Sign in with code</button></div></form>
+  <div class="err" id="loginErr" hidden></div>
+</div>
+
+<div id="app" hidden>
+  <header>
+    <h1>Knowledge admin</h1><span class="badge">ADMIN</span>
+    <span class="who"><span id="me"></span> · Version <span id="ver">-</span> ·
+      <a href="#" id="showAudit">Audit trail</a> · <a href="#" id="logout">Sign out</a></span>
+  </header>
+  <main>
+    <div>
+      <div class="card files"><h2>Files</h2><div id="files"></div></div>
+      <div class="card" style="margin-top:16px"><h2>Earlier versions</h2>
+        <ul class="history" id="history" style="list-style:none;padding:0;margin:0"></ul>
+        <p class="hint" id="noHistory">Pick a file to see its saved versions.</p></div>
+    </div>
+    <div class="card">
+      <h2 id="editTitle">Update</h2>
+      <div class="last" id="last" hidden>
+        <div><strong>Last modified</strong> <span id="lastWhen"></span> by <span id="lastWho"></span></div>
+        <div id="lastWhat"></div>
+        <div id="lastNote" class="hint" style="margin:2px 0 0"></div>
+        <button class="btn" id="lastDiffBtn" style="margin-top:8px">Show what changed</button>
+        <pre class="diff" id="lastDiff" hidden></pre>
+      </div>
+      <div class="modes">
+        <label><input type="radio" name="mode" value="section" checked>Update sections</label>
+        <label><input type="radio" name="mode" value="replace">Replace whole file</label>
+        <label><input type="radio" name="mode" value="new">New file</label>
+      </div>
+      <p class="hint" id="modeHint"></p>
+      <input type="text" id="newName" placeholder="05-new-topic.md" hidden>
+      <textarea id="text" placeholder="## 5. Slots&#10;&#10;Updated text for this section..."></textarea>
+      <input type="text" id="note" placeholder="Reason for this change (shown in the audit trail), e.g. Slots API now needs gender" style="margin-top:8px">
+      <div class="row">
+        <button class="btn" id="preview">Preview changes</button>
+        <button class="btn primary" id="apply" disabled>Apply</button>
+        <button class="btn" id="loadCurrent">Load current file</button>
+      </div>
+      <div id="msg"></div>
+      <div id="result" hidden>
+        <ul class="actions" id="actions"></ul>
+        <pre class="diff" id="diff"></pre>
+      </div>
+    </div>
+  </main>
+  <section class="card audit" id="audit" hidden style="max-width:1100px;margin:0 auto 40px">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <h2 style="margin:0">Audit trail</h2><button class="btn" id="closeAudit">Close</button></div>
+    <p class="hint">Every sign-in and every change to the knowledge: who, when, from where, what changed and why.</p>
+    <div style="overflow:auto"><table id="auditTable"><thead><tr><th>When (UTC)</th><th>Who</th><th>Event</th><th>File</th><th>What changed</th><th>Reason</th><th></th></tr></thead><tbody></tbody></table></div>
+    <pre class="diff" id="auditDiff" hidden></pre>
+  </section>
+</div>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+const $ = (id) => document.getElementById(id);
+let code = sessionStorage.getItem("adminCode") || "";   // local-development fallback only
+let current = null, previewed = null, version = null;
+
+const HINTS = {
+  section: "Paste one or more sections, each starting with a heading (e.g. \"## 5. Slots\"). Each replaces the section with the same title; new titles are added at the end. Everything else in the file stays as it is.",
+  replace: "Paste the complete new file. It replaces the live file; the old one is kept under Earlier versions.",
+  new: "Create a new knowledge file. Use a name like 05-topic.md; files load in name order.",
+};
+const mode = () => document.querySelector("input[name=mode]:checked").value;
+
+async function call(path, body) {
+  const res = await fetch(path, {
+    method: body ? "POST" : "GET",
+    headers: { "Content-Type": "application/json", ...(code ? { "X-Admin-Code": code } : {}) },
+    credentials: "same-origin",
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `Error ${res.status}`);
+  return data;
+}
+function show(kind, text) { $("msg").innerHTML = text ? `<div class="${kind}"></div>` : ""; if (text) $("msg").firstChild.textContent = text; }
+const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+async function loadFiles() {
+  const data = await call("/api/admin/files");
+  version = data.version; $("ver").textContent = version.slice(0, 16);
+  $("files").innerHTML = "";
+  for (const f of data.files) {
+    const b = document.createElement("button");
+    b.title = f.last ? `${f.name}\nLast modified ${new Date(f.last.ts).toLocaleString()} by ${f.last.admin}` : f.name;
+    b.innerHTML = `<span></span><small>${Math.round(f.chars / 1000)}k</small>`;
+    b.firstChild.textContent = f.name;
+    b.className = f.name === current ? "on" : "";
+    b.onclick = () => selectFile(f.name);
+    $("files").appendChild(b);
+  }
+}
+async function selectFile(name) {
+  current = name; resetPreview(); show();
+  $("editTitle").textContent = `Update ${name}`;
+  await loadFiles();
+  const data = await call(`/api/admin/files/${encodeURIComponent(name)}`);
+  showLast(data.last_modified);
+  $("history").innerHTML = "";
+  $("noHistory").hidden = data.history.length > 0;
+  $("noHistory").textContent = "No earlier versions yet.";
+  for (const stamp of data.history.slice(0, 15)) {
+    const li = document.createElement("li");
+    li.innerHTML = `<span></span><button class="btn">Restore</button>`;
+    li.firstChild.textContent = stamp.replace(/^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d).*/, "$1-$2-$3 $4:$5:$6 UTC");
+    li.lastChild.onclick = () => restore(stamp);
+    $("history").appendChild(li);
+  }
+}
+function renderDiff(el, diff) {
+  el.innerHTML = diff.split("\n").map((l) =>
+    `<span class="${l.startsWith("+") && !l.startsWith("+++") ? "add" : l.startsWith("-") && !l.startsWith("---") ? "del" : l.startsWith("@@") ? "hunk" : ""}">${esc(l) || " "}</span>`).join("");
+}
+function ago(ts) {
+  const s = (Date.now() - new Date(ts)) / 1000;
+  return s < 60 ? "just now" : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`;
+}
+function showLast(last) {
+  $("last").hidden = !last;
+  $("lastDiff").hidden = true; $("lastDiffBtn").textContent = "Show what changed";
+  if (!last) return;
+  $("lastWhen").textContent = `${new Date(last.ts).toLocaleString()} (${ago(last.ts)})`;
+  $("lastWho").textContent = last.admin;
+  $("lastWhat").textContent = last.event === "restore"
+    ? `Restored the version saved at ${last.restored.slice(0, 15)}`
+    : (last.actions || []).map((a) => `${a.action[0].toUpperCase() + a.action.slice(1)}: ${a.section}`).join(" · ");
+  $("lastNote").textContent = last.note ? `Reason: ${last.note}` : "No reason given";
+  $("lastDiffBtn").hidden = !last.diff;
+  $("lastDiffBtn").onclick = () => {
+    const open = $("lastDiff").hidden;
+    if (open) renderDiff($("lastDiff"), last.diff);
+    $("lastDiff").hidden = !open; $("lastDiffBtn").textContent = open ? "Hide changes" : "Show what changed";
+  };
+}
+function resetPreview() { previewed = null; $("apply").disabled = true; $("result").hidden = true; }
+function change() {
+  const m = mode();
+  return { file: m === "new" ? $("newName").value.trim() : current, text: $("text").value, mode: m, base_version: version, note: $("note").value.trim() };
+}
+
+$("preview").onclick = async () => {
+  const c = change(); show();
+  if (!c.file) return show("err", mode() === "new" ? "Enter a file name." : "Pick a file first.");
+  if (!c.text.trim()) return show("err", "Paste the updated text first.");
+  try {
+    const p = await call("/api/admin/preview", c);
+    version = p.version;
+    $("actions").innerHTML = p.actions.map((a) =>
+      `<li><span class="tag ${a.action}">${a.action}</span> ${esc(a.section)}` +
+      (a.old_lines !== undefined ? ` <small style="color:var(--muted)">(${a.old_lines} → ${a.new_lines} lines)</small>` : "") + "</li>").join("");
+    $("diff").innerHTML = p.diff ? p.diff.split("\n").map((l) =>
+      `<span class="${l.startsWith("+") && !l.startsWith("+++") ? "add" : l.startsWith("-") && !l.startsWith("---") ? "del" : l.startsWith("@@") ? "hunk" : ""}">${esc(l) || " "}</span>`).join("") : "No changes.";
+    $("result").hidden = false;
+    if (p.internal_terms.length)
+      show("warn", `Internal names found: ${p.internal_terms.join(", ")}. The assistant will hide them from partners, but please rewrite them in partner terms.`);
+    previewed = JSON.stringify({ ...c, base_version: null });
+    $("apply").disabled = !p.diff;
+  } catch (e) { show("err", e.message); }
+};
+$("apply").onclick = async () => {
+  const c = change();
+  if (JSON.stringify({ ...c, base_version: null }) !== previewed) return show("err", "The text changed since the preview. Preview again.");
+  if (!confirm(`Apply these changes to ${c.file}? Partners will get them within a minute.`)) return;
+  try {
+    const r = await call("/api/admin/apply", c);
+    resetPreview(); $("text").value = ""; $("note").value = "";
+    if (c.mode === "new") document.querySelector("input[value=section]").click();
+    await selectFile(c.file);
+    show("ok", `Saved. New version ${r.version.slice(0, 16)}. The assistant uses it from the next question.`);
+  } catch (e) { show("err", e.message); }
+};
+$("loadCurrent").onclick = async () => {
+  if (!current) return show("err", "Pick a file first.");
+  const data = await call(`/api/admin/files/${encodeURIComponent(current)}`);
+  document.querySelector("input[value=replace]").click();
+  $("text").value = data.text; resetPreview();
+};
+async function restore(stamp) {
+  if (!confirm(`Restore ${current} to the version saved at ${stamp}? The current text is kept as another saved version.`)) return;
+  try { await call("/api/admin/restore", { file: current, stamp }); await selectFile(current); show("ok", "Restored."); }
+  catch (e) { show("err", e.message); }
+}
+document.querySelectorAll("input[name=mode]").forEach((r) => r.onchange = () => {
+  $("modeHint").textContent = HINTS[mode()]; $("newName").hidden = mode() !== "new"; resetPreview();
+});
+$("text").oninput = () => { if (previewed) { $("apply").disabled = true; } };
+$("modeHint").textContent = HINTS.section;
+
+async function start() {
+  try {
+    const me = await call("/api/admin/me");
+    $("me").textContent = me.admin;
+    await loadFiles();
+    $("login").hidden = true; $("app").hidden = false;
+    return true;
+  } catch (e) {
+    $("login").hidden = false; $("app").hidden = true;
+    return false;
+  }
+}
+function loginError(msg) { $("loginErr").hidden = !msg; $("loginErr").textContent = msg || ""; }
+
+async function onGoogle(resp) {
+  try {
+    await call("/api/admin/google-login", { credential: resp.credential });
+    code = ""; sessionStorage.removeItem("adminCode"); loginError();
+    await start();
+  } catch (e) { loginError(e.message); }
+}
+async function setupLogin() {
+  const cfg = await fetch("/api/admin/auth-config").then((r) => r.json()).catch(() => ({}));
+  if (!cfg.enabled) { loginError("Admin is not enabled on this server."); return; }
+  $("loginForm").hidden = !cfg.codesEnabled;
+  if (!cfg.googleClientId) { $("googleOff").hidden = false; return; }
+  const ready = () => {
+    google.accounts.id.initialize({ client_id: cfg.googleClientId, callback: onGoogle, auto_select: false });
+    google.accounts.id.renderButton($("googleBtn"), { theme: "outline", size: "large", text: "signin_with", width: 300 });
+  };
+  if (window.google?.accounts?.id) ready();
+  else { const t = setInterval(() => { if (window.google?.accounts?.id) { clearInterval(t); ready(); } }, 100); }
+}
+$("loginForm").onsubmit = async (e) => {
+  e.preventDefault(); code = $("code").value.trim();
+  if (await start()) { sessionStorage.setItem("adminCode", code); loginError(); }
+  else { code = ""; loginError("That admin code isn't valid."); }
+};
+$("logout").onclick = async (e) => {
+  e.preventDefault();
+  await call("/api/admin/logout", {}).catch(() => {});
+  sessionStorage.removeItem("adminCode"); code = "";
+  window.google?.accounts?.id?.disableAutoSelect();
+  location.reload();
+};
+
+/* ---------- audit trail ---------- */
+async function showAudit() {
+  const { events } = await call("/api/admin/audit?limit=200");
+  const body = $("auditTable").querySelector("tbody");
+  body.innerHTML = "";
+  for (const ev of events) {
+    const tr = document.createElement("tr");
+    const what = ev.actions ? ev.actions.map((a) => `${a.action} ${a.section}`).join("; ")
+      : ev.restored ? `restored version ${ev.restored.slice(0, 15)}` : ev.reason || "";
+    const cells = [ev.ts.replace("T", " ").slice(0, 19), `${ev.admin || "-"}${ev.method ? ` (${ev.method})` : ""}\n${ev.ip || ""}`,
+                   ev.event, ev.file || "", what, ev.note || ""];
+    cells.forEach((text, i) => {
+      const td = document.createElement("td"); td.textContent = text; td.style.whiteSpace = i === 1 ? "pre-line" : "";
+      if (i === 2) td.className = `ev ${ev.event}`;
+      tr.appendChild(td);
+    });
+    const td = document.createElement("td");
+    if (ev.diff) {
+      const b = document.createElement("button"); b.className = "btn"; b.textContent = "Changes";
+      b.onclick = () => {
+        $("auditDiff").hidden = false;
+        $("auditDiff").innerHTML = ev.diff.split("\n").map((l) =>
+          `<span class="${l.startsWith("+") && !l.startsWith("+++") ? "add" : l.startsWith("-") && !l.startsWith("---") ? "del" : l.startsWith("@@") ? "hunk" : ""}">${esc(l) || " "}</span>`).join("")
+          + (ev.diff_truncated ? "<span>… (truncated)</span>" : "");
+        $("auditDiff").scrollIntoView({ behavior: "smooth" });
+      };
+      td.appendChild(b);
+    }
+    tr.appendChild(td); body.appendChild(tr);
+  }
+  $("audit").hidden = false; $("auditDiff").hidden = true;
+  $("audit").scrollIntoView({ behavior: "smooth" });
+}
+$("showAudit").onclick = (e) => { e.preventDefault(); showAudit().catch((err) => show("err", err.message)); };
+$("closeAudit").onclick = () => { $("audit").hidden = true; };
+
+(async () => { if (!(await start())) await setupLogin(); })();
+</script>
+</body>
+</html>
