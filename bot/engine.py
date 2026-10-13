@@ -133,6 +133,49 @@ async def _stream_openai_compatible(messages: list[dict], usage_out: dict | None
 
 _cc_workdir = None
 _cc_version = None
+
+INSTALL_HINT = ("Claude Code isn't installed on this computer (or isn't on PATH). Install it with "
+                "`curl -fsSL https://claude.ai/install.sh | bash` (or `npm install -g @anthropic-ai/claude-code`), "
+                "run `claude` once to sign in, then restart the server. If it's installed somewhere else, "
+                "set CLAUDE_CODE_BIN in .env to its full path.")
+
+# Common Claude Code failures -> what the person running it locally should do.
+_CC_HINTS = [
+    (r"credit balance|ANTHROPIC_API_KEY",
+     "Claude Code is using an API key with no credits instead of your Claude subscription. Remove "
+     "ANTHROPIC_API_KEY from your shell environment, run `claude`, type /login and choose your Claude account."),
+    (r"not logged in|please run /login|/login|invalid api key|authenticat|oauth|unauthori[sz]ed|401",
+     "Claude Code isn't signed in on this computer. Open a terminal, run `claude`, sign in with your "
+     "Claude account, then ask again."),
+    (r"usage limit|limit reached|rate.?limit|429|overloaded",
+     "Your Claude subscription's usage limit was reached for now. It resets after a few hours; meanwhile "
+     "you can switch PROVIDER to Gemini in .env."),
+    (r"model.*(not found|not available|invalid)|unknown model|404",
+     "The model in CLAUDE_CODE_MODEL isn't available on your Claude plan. Set CLAUDE_CODE_MODEL=sonnet in .env "
+     "and restart."),
+]
+
+
+def claude_code_bin() -> str | None:
+    """Full path of the Claude Code CLI, or None if it can't be found."""
+    import shutil
+
+    return shutil.which(config.CLAUDE_CODE_BIN)
+
+
+def claude_code_hint(text: str) -> str:
+    import re
+
+    for pattern, hint in _CC_HINTS:
+        if re.search(pattern, text or "", re.I):
+            return hint
+    return "Claude Code couldn't answer. The server terminal shows the details."
+
+
+def _cc_error(hint: str) -> str:
+    # claude_code only ever runs on the developer's own machine (localhost only), so the
+    # setup problem is shown in the chat instead of the generic partner-facing message.
+    return f"⚠️ Local setup issue: {hint}"
 _API_AUTH_VARS = {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"}
 
 
@@ -174,30 +217,40 @@ async def _stream_claude_code(messages: list[dict], usage_out: dict | None,
     # .env puts ANTHROPIC_API_KEY into this process; the CLI would bill that API account instead
     # of the user's claude.ai subscription login, so API-auth variables are not passed on.
     env = {k: v for k, v in os.environ.items() if k not in _API_AUTH_VARS}
+    binary = claude_code_bin()
+    if not binary:
+        log.error(INSTALL_HINT)
+        yield _cc_error(INSTALL_HINT)
+        return
     try:
         proc = await asyncio.create_subprocess_exec(
-            "claude", "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+            binary, "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
             "--tools", "", "--strict-mcp-config", "--no-session-persistence",
             "--system-prompt-file", str(workdir / "system.txt"), "--model", config.CLAUDE_CODE_MODEL,
             cwd=workdir, env=env, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE, limit=16 * 1024 * 1024,
         )
     except FileNotFoundError:
-        log.error("Claude Code CLI ('claude') not found on PATH")
-        yield ERROR_TEXT
+        log.error(INSTALL_HINT)
+        yield _cc_error(INSTALL_HINT)
         return
 
     proc.stdin.write(_as_transcript(messages, summary).encode())
     await proc.stdin.drain()
     proc.stdin.close()
 
-    produced, result = False, None
+    produced, result, other = False, None, []
     try:
         async for line in proc.stdout:
             try:
                 event = json.loads(line)
             except ValueError:
+                other.append(line.decode(errors="replace").strip())
                 continue
+            if not isinstance(event, dict):
+                continue
+            if event.get("type") not in ("stream_event", "result", "system", "assistant", "user"):
+                other.append(json.dumps(event)[:300])
             if event.get("type") == "stream_event":
                 delta = event.get("event", {}).get("delta", {})
                 if delta.get("type") == "text_delta" and delta.get("text"):
@@ -212,9 +265,11 @@ async def _stream_claude_code(messages: list[dict], usage_out: dict | None,
 
     if result is None or result.get("is_error"):
         stderr = (await proc.stderr.read()).decode(errors="replace")[-500:]
-        log.error("Claude Code CLI failed: %s %s", (result or {}).get("result", ""), stderr)
+        detail = f"{(result or {}).get('result', '')} {' '.join(other)[-500:]} {stderr}"
+        hint = claude_code_hint(detail)
+        log.error("Claude Code CLI failed: %s | %s", detail.strip(), hint)
         if not produced:
-            yield ERROR_TEXT
+            yield _cc_error(hint)
         return
     if usage_out is not None:
         u = result.get("usage") or {}
@@ -270,11 +325,27 @@ async def _complete_claude_code(system: str, prompt: str) -> str | None:
     import os
 
     env = {k: v for k, v in os.environ.items() if k not in _API_AUTH_VARS}
+    binary = claude_code_bin()
+    if not binary:
+        log.error(INSTALL_HINT)
+        return None
     proc = await asyncio.create_subprocess_exec(
-        "claude", "-p", "--output-format", "json", "--tools", "", "--strict-mcp-config",
+        binary, "-p", "--output-format", "json", "--tools", "", "--strict-mcp-config",
         "--no-session-persistence", "--system-prompt", system, "--model", config.CLAUDE_CODE_MODEL,
         cwd=_claude_code_workdir(), env=env, stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    out, _ = await asyncio.wait_for(proc.communicate(prompt.encode()), timeout=120)
-    result = json.loads(out or b"{}")
-    return None if result.get("is_error") else (result.get("result") or "").strip() or None
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(prompt.encode()), timeout=120)
+    except asyncio.TimeoutError:
+        proc.kill()
+        log.error("Claude Code CLI timed out")
+        return None
+    try:
+        result = json.loads(out or b"{}")
+    except ValueError:
+        result = {"is_error": True, "result": (out or b"").decode(errors="replace")[-300:]}
+    if result.get("is_error") or not result.get("result"):
+        detail = f"{result.get('result', '')} {(err or b'').decode(errors='replace')[-300:]}"
+        log.error("Claude Code CLI failed: %s | %s", detail.strip(), claude_code_hint(detail))
+        return None
+    return result["result"].strip()

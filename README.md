@@ -40,7 +40,7 @@ Legend used in the diagrams: 🤖 = an AI model is called here. ⚙️ = plain c
 |---|---|---|---|
 | `anthropic` | Claude (`CLAUDE_MODEL`) | Claude API, with prompt caching | Production |
 | `openai_compatible` | Gemini, Groq, Ollama, ... (`LLM_MODEL`) | That provider's API | Free or cheap alternative |
-| `claude_code` | Claude (`CLAUDE_CODE_MODEL`) | Local `claude -p` CLI on your own subscription | **Local testing only.** Refuses access codes and non-localhost requests |
+| `claude_code` | Claude (`CLAUDE_CODE_MODEL`) | Local `claude -p` CLI on each person's own Claude subscription | **Default for running locally.** Refuses access codes and non-localhost requests |
 
 ### 1. Overall view
 
@@ -275,7 +275,8 @@ git checkout feature/partner-assistant
 unzip private-files.zip                     # docs + internal terms, shared privately (not in the repo)
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env                        # then choose PROVIDER and add your AI key
+cp .env.example .env                        # default: your own Claude via Claude Code (no key)
+python scripts/check_setup.py               # checks everything and says how to fix it
 uvicorn app.main:app --port 8000            # open http://localhost:8000
 ```
 

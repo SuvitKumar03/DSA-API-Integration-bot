@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from bot import admin_auth, config
-from bot.engine import complete, stream_answer
+from bot.engine import INSTALL_HINT, claude_code_bin, complete, stream_answer
 from bot.guardrails import StreamRedactor, probe_flags, redact, scrub_secrets
 from bot.knowledge_store import current_version, store, valid_name
 from bot.prompt import SUMMARY_INSTRUCTIONS, load_documentation
@@ -99,6 +99,12 @@ def _warm_up() -> None:
     if config.PROVIDER == "claude_code" and config.ACCESS_CODES:
         raise RuntimeError("PROVIDER=claude_code is for personal local testing only and cannot be used "
                            "with partner ACCESS_CODES. Use PROVIDER=anthropic with an API key.")
+    if config.PROVIDER == "claude_code":
+        binary = claude_code_bin()
+        if not binary:
+            raise RuntimeError(INSTALL_HINT)
+        log.info("Answers come from your own Claude subscription via Claude Code (%s, model %s)",
+                 binary, config.CLAUDE_CODE_MODEL)
     production = bool(config.ACCESS_CODES)
     if production and not config.INTERNAL_TERMS_FILE.exists():
         raise RuntimeError(f"Internal terms file {config.INTERNAL_TERMS_FILE} is missing. Partner-facing "

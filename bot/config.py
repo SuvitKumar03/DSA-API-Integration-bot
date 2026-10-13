@@ -29,6 +29,8 @@ LLM_MODEL = os.getenv("LLM_MODEL", "")
 # subscription. Personal local testing only: the app refuses partner access codes and
 # non-localhost requests in this mode.
 CLAUDE_CODE_MODEL = os.getenv("CLAUDE_CODE_MODEL", "sonnet")
+# Path or name of the Claude Code CLI, if it isn't on PATH as "claude".
+CLAUDE_CODE_BIN = os.getenv("CLAUDE_CODE_BIN", "claude")
 
 MODEL = {
     "anthropic": os.getenv("CLAUDE_MODEL", "claude-opus-5-5"),

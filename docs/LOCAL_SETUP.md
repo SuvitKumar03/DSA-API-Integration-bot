@@ -9,7 +9,7 @@ You'll need:
 | A Mac, Linux or Windows (WSL) machine with **Python 3.10+** and **git** | Check with `python3 --version` and `git --version` |
 | Access to the GitHub repo | `SuvitKumar03/DSA-API-Integration-bot` |
 | **`private-files.zip`** | From Suvit, shared privately. It holds the docs the bot answers from and the list of internal names it must hide; neither is in the public repo |
-| An **AI key**: a free Gemini key is enough | You create your own (step 4) |
+| **Your own Claude** (Pro, Max, Team or Enterprise), or a free Gemini key | Step 4 |
 
 ## 1. Get the code
 
@@ -50,19 +50,34 @@ pip install -r requirements.txt
 
 Run `source .venv/bin/activate` again in every new terminal before running the app.
 
-## 4. Get an AI key
+## 4. Choose which AI answers
 
-The bot needs an AI model. Pick one:
+**Option A: your own Claude (recommended).** Answers come from your own Claude account through
+Claude Code, the same way Suvit runs it. No API key needed.
 
-**Option A: Gemini (free, recommended to start)**
+1. Install Claude Code:
+   ```bash
+   curl -fsSL https://claude.ai/install.sh | bash
+   ```
+   (or `npm install -g @anthropic-ai/claude-code` if you use Node 18+)
+2. Sign in once: run `claude` in a terminal, follow the browser sign-in with your Claude
+   account, then type `/exit`.
+3. Check: `claude --version` prints a version.
+
+Good to know:
+- Answers count against **your** Claude plan's usage limits. If you hit the limit, the chat says
+  so; it resets after a few hours, or switch to Gemini meanwhile.
+- This mode only answers on your own machine (localhost). It can't be shared with partners.
+- `sonnet` is used by default. To change it, set `CLAUDE_CODE_MODEL=opus` or `haiku` in `.env`.
+
+**Option B: Gemini (free).**
 1. Open https://aistudio.google.com/apikey and sign in with your Google account.
 2. Click **Create API key** and copy it.
 
-**Option B: Claude API** (best answers, paid): an `ANTHROPIC_API_KEY` from the org's Anthropic Console account. Ask Suvit.
+**Option C: Claude API key** (for the shared deployment): an `ANTHROPIC_API_KEY` from the org's
+Anthropic Console account. Ask Suvit.
 
-**Option C: your own Claude subscription, local testing only**: needs the Claude Code CLI installed and signed in (`claude` works in your terminal). No key needed.
-
-Use your own key. Don't share keys in chat or commit them.
+Use your own account or key. Don't share keys in chat or commit them.
 
 ## 5. Create your `.env`
 
@@ -70,10 +85,11 @@ Use your own key. Don't share keys in chat or commit them.
 cp .env.example .env
 ```
 
-Open `.env` and set **one** of these blocks:
+The example is already set up for **option A** (`PROVIDER=claude_code`), so there's nothing to
+change. For another option, set **one** of these blocks in `.env` instead:
 
 ```bash
-# Option A: Gemini
+# Option B: Gemini
 PROVIDER=openai_compatible
 LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
 LLM_API_KEY=<your Gemini key>
@@ -81,17 +97,21 @@ LLM_MODEL=gemini-flash-lite-latest
 ```
 
 ```bash
-# Option B: Claude API
+# Option C: Claude API
 PROVIDER=anthropic
 ANTHROPIC_API_KEY=<the key>
 ```
 
+Leave `ACCESS_CODES` empty for local use (no partner login).
+
+**Check everything in one go:**
+
 ```bash
-# Option C: local Claude Code (your subscription)
-PROVIDER=claude_code
+python scripts/check_setup.py
 ```
 
-Leave `ACCESS_CODES` empty for local use (no partner login).
+It checks Python, the packages, the private files and `.env`, and sends one tiny test question to
+your chosen AI. Each ❌ line says how to fix it. When it prints "All good", go on.
 
 ## 6. Run it
 
@@ -140,9 +160,12 @@ ADMIN_CODES=<your name>:<a code you choose>
 | `RuntimeError: No knowledge files found` | Step 2 wasn't done: unzip `private-files.zip` in the repo root |
 | `ModuleNotFoundError` | The virtual environment isn't active: `source .venv/bin/activate`, then `pip install -r requirements.txt` |
 | `Address already in use` | Something else uses port 8000. Stop it, or run on `--port 8001` (then Google admin sign-in needs that origin added, so prefer freeing 8000) |
-| Answers say "Credit balance is too low" | The Claude API key has no credits. Use Gemini (option A) |
+| Chat says "⚠️ Local setup issue: Claude Code isn't installed" | Do option A in step 4, or set `CLAUDE_CODE_BIN` to the full path of `claude` |
+| Chat says "Claude Code isn't signed in" | Run `claude` in a terminal and sign in, then ask again |
+| Chat says "usage limit was reached" | Your Claude plan's limit; wait a few hours or switch to Gemini (option B) |
+| "Credit balance is too low" | An API key with no credits is being used. With option A, remove `ANTHROPIC_API_KEY` from your shell (`unset ANTHROPIC_API_KEY`); with option C, ask for a key with credits |
 | Gemini answers very slowly or times out | Use `LLM_MODEL=gemini-flash-lite-latest` |
-| `PROVIDER=claude_code` fails | Check `claude --version` works and you're signed in. Remove `ANTHROPIC_API_KEY` from `.env` if it's set |
+| Server won't start: "Claude Code isn't installed" | `claude --version` must work in the same terminal; run `python scripts/check_setup.py` |
 | Google sign-in: `Error 400: origin_mismatch` | Open `http://localhost:8000/admin` exactly (not `127.0.0.1`), or ask Suvit to add your origin to the OAuth client |
 | Google sign-in: "... is not an admin" | Your email isn't in `ADMIN_EMAILS` in your `.env` |
 | `/admin` says "Admin is not enabled" | Set `ADMIN_EMAILS` (with `GOOGLE_CLIENT_ID`) or `ADMIN_CODES`, then restart |
