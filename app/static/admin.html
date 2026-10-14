@@ -92,7 +92,7 @@
   <header>
     <h1>Knowledge admin</h1><span class="badge">ADMIN</span>
     <span class="who"><span id="me"></span> · Version <span id="ver">-</span> ·
-      <a href="#" id="showAudit">Audit trail</a> · <a href="#" id="logout">Sign out</a></span>
+      <a href="#" id="showAudit">Audit trail</a> · <a href="#" id="showBlocks">Blocked users</a> · <a href="#" id="logout">Sign out</a></span>
   </header>
   <main>
     <div>
@@ -131,6 +131,20 @@
       </div>
     </div>
   </main>
+  <section class="card" id="blocks" hidden style="max-width:1100px;margin:0 auto 24px">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <h2 style="margin:0">Blocked users</h2><button class="btn" id="closeBlocks">Close</button></div>
+    <p class="hint" id="blockRules"></p>
+    <div style="overflow:auto"><table id="blockTable"><thead><tr><th>Who</th><th>Blocked until</th><th>Reason</th><th>By</th><th></th></tr></thead><tbody></tbody></table></div>
+    <p class="hint" id="noBlocks">Nobody is blocked right now.</p>
+    <div class="row" style="align-items:center">
+      <input type="text" id="blockSubject" placeholder="ip:1.2.3.4 or cid:browser-id" style="max-width:280px">
+      <input type="text" id="blockNote" placeholder="Reason" style="max-width:280px">
+      <button class="btn" id="blockBtn">Block manually</button>
+    </div>
+    <h2 style="margin:18px 0 8px">Recent strikes and blocks</h2>
+    <div style="overflow:auto"><table id="eventTable"><thead><tr><th>When (UTC)</th><th>Event</th><th>Who</th><th>Reason</th></tr></thead><tbody></tbody></table></div>
+  </section>
   <section class="card audit" id="audit" hidden style="max-width:1100px;margin:0 auto 40px">
     <div style="display:flex;align-items:center;justify-content:space-between">
       <h2 style="margin:0">Audit trail</h2><button class="btn" id="closeAudit">Close</button></div>
@@ -358,6 +372,47 @@ async function showAudit() {
 }
 $("showAudit").onclick = (e) => { e.preventDefault(); showAudit().catch((err) => show("err", err.message)); };
 $("closeAudit").onclick = () => { $("audit").hidden = true; };
+
+/* ---------- blocked users ---------- */
+function cells(tr, values) {
+  for (const v of values) { const td = document.createElement("td"); td.textContent = v; tr.appendChild(td); }
+}
+async function showBlocks() {
+  const data = await call("/api/admin/blocks");
+  const st = data.settings;
+  $("blockRules").textContent = `Rules: ${st.per_minute} questions/min and ${st.per_hour}/hour per user. ` +
+    `${st.strikes_to_block} spam strikes (gibberish, repeats, off-topic, manipulation) within ${st.window_minutes} min ` +
+    `block the browser${st.block_by_ip ? " and IP" : ""} for ${st.block_hours} h. Resets if the server restarts.`;
+  const body = $("blockTable").querySelector("tbody"); body.innerHTML = "";
+  $("noBlocks").hidden = data.blocks.length > 0;
+  for (const b of data.blocks) {
+    const tr = document.createElement("tr");
+    cells(tr, [b.subject, new Date(b.until * 1000).toLocaleString(), b.reason, b.by]);
+    const td = document.createElement("td"), btn = document.createElement("button");
+    btn.className = "btn"; btn.textContent = "Unblock";
+    btn.onclick = async () => {
+      const note = prompt(`Unblock ${b.subject}? Reason (for the audit trail):`, "");
+      if (note === null) return;
+      await call("/api/admin/unblock", { subject: b.subject, note }); showBlocks();
+    };
+    td.appendChild(btn); tr.appendChild(td); body.appendChild(tr);
+  }
+  const ev = $("eventTable").querySelector("tbody"); ev.innerHTML = "";
+  for (const e of data.events) {
+    const tr = document.createElement("tr");
+    cells(tr, [e.ts.replace("T", " ").slice(0, 19), e.event, e.subjects.join(", "), e.reason]);
+    ev.appendChild(tr);
+  }
+  $("blocks").hidden = false; $("blocks").scrollIntoView({ behavior: "smooth" });
+}
+$("showBlocks").onclick = (e) => { e.preventDefault(); showBlocks().catch((err) => show("err", err.message)); };
+$("closeBlocks").onclick = () => { $("blocks").hidden = true; };
+$("blockBtn").onclick = async () => {
+  const subject = $("blockSubject").value.trim();
+  if (!/^(ip|cid):/.test(subject)) return alert("Use ip:<address> or cid:<browser id>");
+  try { await call("/api/admin/block", { subject, note: $("blockNote").value.trim() }); $("blockSubject").value = ""; $("blockNote").value = ""; showBlocks(); }
+  catch (e) { alert(e.message); }
+};
 
 (async () => { if (!(await start())) await setupLogin(); })();
 </script>

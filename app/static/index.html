@@ -471,6 +471,12 @@ const SUGGESTIONS = [
 
 let cfg = { botName: "Integration Assistant", maxChars: 8000 };
 let accessCode = store.get("accessCode") || "";
+// Random ID for this browser, used only for rate limiting and spam protection.
+let clientId = store.get("ia.cid");
+if (!clientId) {
+  clientId = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
+  store.set("ia.cid", clientId);
+}
 let history = [];          // [{role, content}]
 let controller = null;     // AbortController while streaming
 
@@ -551,7 +557,7 @@ $("jump").onclick = () => scrollDown(true);
 function api(path, body) {
   return fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Access-Code": accessCode },
+    headers: { "Content-Type": "application/json", "X-Access-Code": accessCode, "X-Client-Id": clientId },
     body: JSON.stringify(body ?? {}),
   });
 }
@@ -693,7 +699,7 @@ async function ask(question) {
   try {
     const res = await fetch("/api/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Access-Code": accessCode },
+      headers: { "Content-Type": "application/json", "X-Access-Code": accessCode, "X-Client-Id": clientId },
       body: JSON.stringify({ messages: history, summary: loadMemory()?.summary || "" }),
       signal: controller.signal,
     });
@@ -703,8 +709,7 @@ async function ask(question) {
     }
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(res.status === 429 ? "You've reached the hourly question limit. Please try again a little later."
-                                         : err.detail || `Something went wrong (${res.status}). Please try again.`);
+      throw new Error(err.detail || `Something went wrong (${res.status}). Please try again.`);
     }
     messageId = res.headers.get("X-Message-Id");
     const reader = res.body.getReader();

@@ -246,3 +246,6 @@ notes/
 
 # Private files bundle for teammates (scripts/pack-private.sh)
 private-files*.zip
+
+# Cloud Run settings with real values
+deploy/env.yaml

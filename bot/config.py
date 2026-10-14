@@ -68,7 +68,22 @@ for _pair in os.getenv("ADMIN_CODES", "").split(","):
         _name, _code = _pair.split(":", 1)
         ADMIN_CODES[_code.strip()] = _name.strip()
 
+# Rate limits per user (browser + IP; see bot/abuse.py).
+RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "8"))
 RATE_LIMIT_PER_HOUR = int(os.getenv("RATE_LIMIT_PER_HOUR", "60"))
+# Spam: this many strikes (gibberish, repeats, off-topic, manipulation) within the window
+# blocks the user for BLOCK_HOURS. A warning is shown from WARN_AFTER_STRIKES.
+STRIKES_TO_BLOCK = int(os.getenv("STRIKES_TO_BLOCK", "5"))
+STRIKE_WINDOW_MINUTES = int(os.getenv("STRIKE_WINDOW_MINUTES", "30"))
+WARN_AFTER_STRIKES = int(os.getenv("WARN_AFTER_STRIKES", "3"))
+BLOCK_HOURS = float(os.getenv("BLOCK_HOURS", "2"))
+# Also block the IP (not just the browser). Note: people behind one office IP share it.
+BLOCK_BY_IP = os.getenv("BLOCK_BY_IP", "true").lower() == "true"
+# Answers being generated at the same time, across all users (protects the AI quota and CPU).
+MAX_CONCURRENT_ANSWERS = int(os.getenv("MAX_CONCURRENT_ANSWERS", "20"))
+# Proxies in front of the app that append to X-Forwarded-For: 0 = use the socket address
+# (local), 1 = Cloud Run directly, 2 = Cloud Run behind an external load balancer.
+TRUSTED_PROXY_HOPS = int(os.getenv("TRUSTED_PROXY_HOPS", "0"))
 MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "20"))
 MAX_MESSAGE_CHARS = int(os.getenv("MAX_MESSAGE_CHARS", "8000"))
 

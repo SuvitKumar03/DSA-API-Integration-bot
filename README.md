@@ -213,7 +213,33 @@ flowchart LR
 
 At startup the server also refuses to run with partner access codes if `internal_terms.txt` is missing, and warns if any internal name is still left in the docs.
 
-### 6. Learning from the partner Google Chat (offline, run by hand)
+### 6. Rate limits and spam protection (`bot/abuse.py`)
+
+```mermaid
+flowchart TD
+    Q["Question arrives at /api/chat<br/>user = browser ID (X-Client-Id) + IP"] --> B{"Blocked?"}
+    B -- yes --> R1["429: access paused until HH:MM IST"]
+    B -- no --> RL{"Over 8/min or 60/hour?"}
+    RL -- yes --> R2["429: slow down / try again at ..."]
+    RL -- no --> PRE{"⚙️ Cheap checks (no AI call)<br/>gibberish? same message a 3rd time?<br/>prompt-extraction or override attempt?"}
+    PRE -- "gibberish / repeat" --> S1["Strike + canned reply"]
+    PRE -- "manipulation" --> S2["Strike, then the AI declines politely"]
+    PRE -- clean --> C{"Too many answers running?<br/>(1 per user, MAX_CONCURRENT_ANSWERS overall)"}
+    S2 --> C
+    C -- yes --> R3["429 / 503: wait a moment"]
+    C -- no --> AI["🤖 AI answers<br/>starts with [[OFF_TOPIC]] if unrelated"]
+    AI -- "marker found (hidden from user)" --> S3["Strike"]
+    AI -- normal --> OK["Answer streamed"]
+    S1 & S3 --> W{"Strikes in last 30 min"}
+    W -- "3-4" --> W1["Answer + warning: N more and access pauses"]
+    W -- "5" --> BL["Block browser ID + IP for 2 hours<br/>(IP alone: 15 strikes, catches cleared browser IDs)"]
+    BL --> ADM["Visible in /admin → Blocked users<br/>admins can unblock or block manually (audited)"]
+```
+
+Greetings, thanks, follow-ups and vague API questions never count as strikes. State is kept in
+memory per server instance; with several instances, move it to Redis.
+
+### 7. Learning from the partner Google Chat (offline, run by hand)
 
 ```mermaid
 flowchart LR
@@ -238,6 +264,7 @@ flowchart LR
 | `bot/prompt.py` | Instructions, docs block (reloaded on version change), partner-context block, summary instructions | No (builds the prompt) |
 | `bot/engine.py` | Talks to the chosen provider: `stream_answer()` for answers, `complete()` for summaries | 🤖 Yes |
 | `bot/guardrails.py` | Internal-name rules, doc sanitising, streaming answer filter, secret scrubbing, probe flags | No |
+| `bot/abuse.py` | Rate limits, gibberish/repeat checks, strikes, 2-hour blocks, concurrency limit | No |
 | `bot/knowledge_store.py` | Reads and writes the knowledge (local folder or GCS), history, version, audit trail | No |
 | `bot/sections.py` | Section matching and merge, diff | No |
 | `cli.py` | Terminal chat for testing answers | 🤖 Yes, via the engine |
@@ -295,7 +322,12 @@ To share the private files with a teammate: `scripts/pack-private.sh` creates `p
 | `BOT_NAME` | Thyrocare Integration Assistant | Shown in UI and used in the prompt |
 | `SUPPORT_CONTACT` | the Thyrocare integration team | Where the bot sends partners when it can't answer |
 | `ACCESS_CODES` | empty (no login) | `partner:code` pairs, comma separated. **Set this before sharing the URL.** |
-| `RATE_LIMIT_PER_HOUR` | `60` | Questions per partner per hour |
+| `RATE_LIMIT_PER_MINUTE`, `RATE_LIMIT_PER_HOUR` | `8`, `60` | Questions per user (browser + IP) |
+| `STRIKES_TO_BLOCK`, `STRIKE_WINDOW_MINUTES`, `BLOCK_HOURS` | `5`, `30`, `2` | Spam strikes within the window that block a user, and for how long |
+| `WARN_AFTER_STRIKES` | `3` | From this strike on, answers carry a warning |
+| `BLOCK_BY_IP` | `true` | Block the IP as well as the browser (people behind one office IP share it) |
+| `MAX_CONCURRENT_ANSWERS` | `20` | Answers generated at the same time across all users |
+| `TRUSTED_PROXY_HOPS` | `0` | Proxies that add `X-Forwarded-For`: `0` local, `1` Cloud Run, `2` Cloud Run behind a load balancer |
 | `ADMIN_EMAILS` | empty (admin off) | Google accounts that are admins, comma separated |
 | `GOOGLE_CLIENT_ID` | — | OAuth Web client ID for "Sign in with Google" on `/admin` |
 | `ADMIN_SESSION_SECRET` | random per start | Signs admin session cookies; set a fixed long value in production |
@@ -308,22 +340,21 @@ To share the private files with a teammate: `scripts/pack-private.sh` creates `p
 
 ## Deploy
 
-The app is a single Docker container.
+**Google Cloud (Cloud Run): step-by-step guide in [docs/deploy-gcp.md](docs/deploy-gcp.md).** Docs live in a private
+Cloud Storage bucket, secrets (API key, partner codes, internal terms) in Secret Manager, admins sign in with Google.
+In the cloud the AI must be the Claude API (or Gemini); `PROVIDER=claude_code` is for personal machines only.
+
+**Docker anywhere else:** private files are not baked into the image, so mount them:
 
 ```bash
 docker build -t integration-bot .
-docker run -p 8000:8000 --env-file .env integration-bot
+docker run -p 8000:8000 --env-file .env \
+  -v "$PWD/knowledge:/srv/knowledge" -v "$PWD/internal_terms.txt:/srv/internal_terms.txt:ro" integration-bot
 ```
 
-**Render / Railway (quick pilot):** connect this GitHub repo, choose "Docker", and set the environment variables (`ANTHROPIC_API_KEY`, `ACCESS_CODES`, ...) in the dashboard. Health check path: `/healthz`.
-
-**Google Cloud (planned):** Cloud Run + a private Cloud Storage bucket for the docs + Secret Manager + IAP for admins. See [docs/deploy-gcp.md](docs/deploy-gcp.md).
-
-**AWS (alternative):** push the image to ECR and run it on ECS Fargate or App Runner behind HTTPS, with the API key in Secrets Manager.
-
 Notes:
-- Chat logs are written to `logs/` inside the container. On most hosts this is lost on redeploy; mount a volume, or move logs to a database when you need them long-term.
-- The rate limiter is in-memory, so run a single instance (fine for a pilot).
+- Chat logs are written to `logs/` inside the container and are lost on redeploy unless you mount a volume.
+- Rate limits and blocks are in memory, so run a single instance (fine for a pilot), or move them to Redis.
 
 ## Reviewing answers
 

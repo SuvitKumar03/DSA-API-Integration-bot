@@ -5,21 +5,21 @@ import json
 import logging
 import time
 import uuid
-from collections import defaultdict, deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from bot import admin_auth, config
+from bot.abuse import CANNED, Limited, guard
 from bot.engine import INSTALL_HINT, claude_code_bin, complete, stream_answer
 from bot.guardrails import StreamRedactor, probe_flags, redact, scrub_secrets
 from bot.knowledge_store import current_version, store, valid_name
-from bot.prompt import SUMMARY_INSTRUCTIONS, load_documentation
+from bot.prompt import OFF_TOPIC_MARKER, SUMMARY_INSTRUCTIONS, load_documentation
 from bot.sections import apply_update, unified_diff
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -65,7 +65,23 @@ def _partner_for(code: str | None) -> str:
     raise HTTPException(status_code=401, detail="Invalid access code")
 
 
-_requests: dict[str, deque] = defaultdict(deque)
+def _client_ip(request: Request) -> str:
+    """The caller's IP. Behind proxies, take the entry the nearest trusted proxy added."""
+    hops = config.TRUSTED_PROXY_HOPS
+    fwd = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
+    if hops and len(fwd) >= hops:
+        return fwd[-hops]
+    return request.client.host if request.client else ""
+
+
+def _subjects(request: Request) -> list[str]:
+    return guard.subjects(_client_ip(request), request.headers.get("x-client-id"))
+
+
+@app.exception_handler(Limited)
+async def _limited(_: Request, exc: Limited) -> JSONResponse:
+    return JSONResponse({"detail": exc.message}, status_code=exc.status,
+                        headers={"Retry-After": str(max(1, exc.retry_after))})
 
 
 def _local_only(request: Request) -> None:
@@ -77,16 +93,6 @@ def _local_only(request: Request) -> None:
 def _clean_summary(text: str) -> str:
     text, _ = redact(scrub_secrets(text or ""))
     return text.strip()[: config.SUMMARY_MAX_CHARS]
-
-
-def _check_rate_limit(partner: str) -> None:
-    now = time.time()
-    window = _requests[partner]
-    while window and now - window[0] > 3600:
-        window.popleft()
-    if len(window) >= config.RATE_LIMIT_PER_HOUR:
-        raise HTTPException(status_code=429, detail="Too many questions. Please try again later.")
-    window.append(now)
 
 
 def _append_jsonl(path: Path, record: dict) -> None:
@@ -152,11 +158,26 @@ def login(x_access_code: str | None = Header(default=None)) -> dict:
     return {"partner": _partner_for(x_access_code)}
 
 
+def _strike_note(strikes: int, blocked_until: float | None) -> str:
+    """Text added to an answer after a strike: a warning, or the notice that access is paused."""
+    if blocked_until:
+        return (f"\n\n_Access is now paused for {config.BLOCK_HOURS:g} hours because of repeated unrelated "
+                f"or spam messages._")
+    if strikes >= config.WARN_AFTER_STRIKES:
+        left = config.STRIKES_TO_BLOCK - strikes
+        return (f"\n\n_Please keep questions to the Thyrocare partner API integration. After {left} more "
+                f"unrelated message{'s' if left != 1 else ''}, access will be paused for {config.BLOCK_HOURS:g} hours._")
+    return ""
+
+
 @app.post("/api/chat")
 async def chat(req: ChatRequest, request: Request, x_access_code: str | None = Header(default=None)):
     _local_only(request)
     partner = _partner_for(x_access_code)
-    _check_rate_limit(partner)
+    subjects = _subjects(request)
+    guard.check_blocked(subjects)
+    client_key = f"{partner}|{subjects[0]}"
+    guard.check_rate(client_key, config.RATE_LIMIT_PER_MINUTE, config.RATE_LIMIT_PER_HOUR)
 
     history = [m.model_dump() for m in req.messages][-config.MAX_HISTORY_MESSAGES:]
     if history[0]["role"] != "user":
@@ -171,7 +192,40 @@ async def chat(req: ChatRequest, request: Request, x_access_code: str | None = H
     summary = _clean_summary(req.summary)
     flags = probe_flags(question["content"])
     if flags:
-        log.warning("Probe-like question from %s: %s", partner, flags)
+        log.warning("Probe-like question from %s %s: %s", partner, subjects, flags)
+
+    def _log(answer: str, **extra) -> None:
+        _append_jsonl(CHAT_LOG, {
+            "id": message_id,
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "partner": partner,
+            "client": subjects,
+            # Tokens, keys, emails and phone numbers are never written to the server log.
+            "question": scrub_secrets(question["content"]),
+            "answer": scrub_secrets(answer),
+            "turns": len(history),
+            "flags": flags,
+            "had_summary": bool(summary),
+            **extra,
+        })
+
+    # Cheap spam checks first: these never reach the AI.
+    reason = guard.precheck(subjects, question["content"])
+    if not reason and {"prompt_extraction", "instruction_override"} & set(flags):
+        reason = "manipulation"
+    if reason:
+        strikes, until = guard.strike(subjects, reason)
+        log.warning("Strike (%s) for %s: %d in window%s", reason, subjects, strikes, ", BLOCKED" if until else "")
+        if until:
+            _log("", spam=reason, strikes=strikes, blocked=True)
+            guard.check_blocked(subjects)          # raises the "access paused" response
+        if reason in CANNED:
+            text = CANNED[reason] + _strike_note(strikes, None)
+            _log(text, spam=reason, strikes=strikes)
+            return PlainTextResponse(text, headers={"X-Message-Id": message_id, "Cache-Control": "no-cache"})
+        # Manipulation attempts still get an answer: the AI declines politely.
+
+    guard.acquire(client_key)
 
     async def generate():
         answer_parts: list[str] = []
@@ -179,31 +233,42 @@ async def chat(req: ChatRequest, request: Request, x_access_code: str | None = H
         started = time.time()
         # Every answer passes the internal-name filter before it reaches the partner.
         redactor = StreamRedactor()
-        async for chunk in stream_answer(history, usage_out=usage, summary=summary):
-            out = redactor.feed(chunk)
-            if out:
-                answer_parts.append(out)
-                yield out
-        tail = redactor.flush()
-        if tail:
-            answer_parts.append(tail)
-            yield tail
+        head, decided, off_topic = "", False, False
+        try:
+            async for chunk in stream_answer(history, usage_out=usage, summary=summary):
+                if not decided:
+                    # Hold the first characters until we know whether the AI marked the
+                    # question as off-topic; the marker itself is never shown.
+                    head += chunk
+                    stripped = head.lstrip()
+                    if len(stripped) < len(OFF_TOPIC_MARKER) and OFF_TOPIC_MARKER.startswith(stripped):
+                        continue
+                    decided = True
+                    off_topic = stripped.startswith(OFF_TOPIC_MARKER)
+                    chunk = stripped[len(OFF_TOPIC_MARKER):].lstrip() if off_topic else head
+                out = redactor.feed(chunk.replace(OFF_TOPIC_MARKER, ""))
+                if out:
+                    answer_parts.append(out)
+                    yield out
+            if not decided and head:
+                answer_parts.append(redactor.feed(head.replace(OFF_TOPIC_MARKER, "")))
+                yield answer_parts[-1]
+            tail = redactor.flush()
+            if off_topic:
+                strikes, until = guard.strike(subjects, "off_topic")
+                log.warning("Strike (off_topic) for %s: %d in window%s", subjects, strikes, ", BLOCKED" if until else "")
+                tail += _strike_note(strikes, until)
+            elif reason == "manipulation":
+                tail += _strike_note(guard.strike_count(subjects), None)
+            if tail:
+                answer_parts.append(tail)
+                yield tail
+        finally:
+            guard.release(client_key)
         if redactor.hits:
             log.warning("Redacted internal terms from answer %s: %s", message_id, sorted(set(redactor.hits)))
-        _append_jsonl(CHAT_LOG, {
-            "id": message_id,
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "partner": partner,
-            # Tokens, keys, emails and phone numbers are never written to the server log.
-            "question": scrub_secrets(question["content"]),
-            "answer": scrub_secrets("".join(answer_parts)),
-            "turns": len(history),
-            "latency_s": round(time.time() - started, 2),
-            "usage": usage,
-            "flags": flags,
-            "redacted": sorted(set(redactor.hits)),
-            "had_summary": bool(summary),
-        })
+        _log("".join(answer_parts), latency_s=round(time.time() - started, 2), usage=usage,
+             redacted=sorted(set(redactor.hits)), spam="off_topic" if off_topic else reason)
 
     return StreamingResponse(
         generate(),
@@ -213,8 +278,11 @@ async def chat(req: ChatRequest, request: Request, x_access_code: str | None = H
 
 
 @app.post("/api/feedback")
-def feedback(fb: Feedback, x_access_code: str | None = Header(default=None)) -> dict:
+def feedback(fb: Feedback, request: Request, x_access_code: str | None = Header(default=None)) -> dict:
     partner = _partner_for(x_access_code)
+    subjects = _subjects(request)
+    guard.check_blocked(subjects)
+    guard.check_rate(f"{partner}|{subjects[0]}:feedback", 20, 200)
     _append_jsonl(FEEDBACK_LOG, {
         "ts": datetime.now(timezone.utc).isoformat(),
         "partner": partner,
@@ -229,7 +297,9 @@ async def summarize(req: SummaryRequest, request: Request, x_access_code: str | 
     """Update the partner's session memory. The result is returned to the browser and not stored here."""
     _local_only(request)
     partner = _partner_for(x_access_code)
-    _check_rate_limit(partner + ":summary")
+    subjects = _subjects(request)
+    guard.check_blocked(subjects)
+    guard.check_rate(f"{partner}|{subjects[0]}:summary", 4, 30)
     transcript = "\n\n".join(f"[{m.role.upper()}]\n{m.content[:3000]}" for m in req.messages)
     prompt = (f"Previous memory:\n{_clean_summary(req.previous) or '(none)'}\n\n"
               f"New conversation:\n{scrub_secrets(transcript)}")
@@ -246,11 +316,6 @@ async def summarize(req: SummaryRequest, request: Request, x_access_code: str | 
 
 MAX_KNOWLEDGE_CHARS = 400_000
 MAX_AUDIT_DIFF_CHARS = 20_000
-
-
-def _client_ip(request: Request) -> str:
-    fwd = request.headers.get("x-forwarded-for", "")
-    return fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "")
 
 
 def _admin(request: Request) -> dict:
@@ -467,3 +532,38 @@ def admin_restore(req: Restore, request: Request) -> dict:
 def admin_audit(request: Request, limit: int = 100) -> dict:
     _admin(request)
     return {"events": store().read_audit(max(1, min(limit, 500)))}
+
+
+# ---------------------------------------------------------------- admin: blocked users
+
+class BlockChange(BaseModel):
+    subject: str = Field(pattern=r"^(ip|cid):[\w.:-]{1,80}$")
+    note: str = Field(default="", max_length=500)
+
+
+@app.get("/api/admin/blocks")
+def admin_blocks(request: Request) -> dict:
+    _admin(request)
+    return {
+        "blocks": guard.list_blocks(),
+        "events": list(guard.events)[:100],
+        "settings": {"strikes_to_block": config.STRIKES_TO_BLOCK, "window_minutes": config.STRIKE_WINDOW_MINUTES,
+                     "block_hours": config.BLOCK_HOURS, "block_by_ip": config.BLOCK_BY_IP,
+                     "per_minute": config.RATE_LIMIT_PER_MINUTE, "per_hour": config.RATE_LIMIT_PER_HOUR},
+    }
+
+
+@app.post("/api/admin/unblock")
+def admin_unblock(req: BlockChange, request: Request) -> dict:
+    who = _admin(request)
+    found = guard.unblock(req.subject)
+    _audit(request, "unblock", who, subject=req.subject, note=req.note, found=found)
+    return {"ok": found}
+
+
+@app.post("/api/admin/block")
+def admin_block(req: BlockChange, request: Request) -> dict:
+    who = _admin(request)
+    until = guard.block([req.subject], f"manual: {req.note or 'by admin'}", by=who["admin"])
+    _audit(request, "block", who, subject=req.subject, note=req.note, until=until)
+    return {"ok": True, "until": until}

@@ -1,0 +1,14 @@
+# Files NOT uploaded by `gcloud run deploy --source .`
+# Everything git-ignored (keys, .env, private docs, internal terms, logs, chat exports)...
+#!include:.gitignore
+# ...plus things the image doesn't need
+.git
+.gitignore
+.gcloudignore
+docs/
+scripts/
+chat_export/
+cli.py
+deploy/
+*.md
+!knowledge/README.md
