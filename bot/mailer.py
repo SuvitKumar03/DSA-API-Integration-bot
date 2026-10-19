@@ -37,7 +37,10 @@ def _service():
         creds = Credentials.from_authorized_user_file(str(path), SCOPES)
         if not creds.valid:
             creds.refresh(Request())
-            path.write_text(creds.to_json())
+            try:
+                path.write_text(creds.to_json())
+            except OSError:
+                pass          # read-only secret mount (Cloud Run): the refreshed token lives in memory
     except Exception as e:
         raise MailError(f"Gmail sign-in expired or invalid; run `python scripts/connect_gmail.py` again ({type(e).__name__}).")
     return build("gmail", "v1", credentials=creds, cache_discovery=False)

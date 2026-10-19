@@ -16,6 +16,7 @@ Usage:
 
 import argparse
 import hashlib
+import os
 import json
 import re
 from collections import Counter, defaultdict
@@ -31,7 +32,8 @@ IST = timezone(timedelta(hours=5, minutes=30))
 #   askers           people who raise doubts in the group; everyone else is TEAM, except
 #   unknown_senders  senders whose role the extraction model infers from context
 #   client_names     partner company names, replaced with <CLIENT> so FAQ entries stay generic
-_PRIVATE = HERE / "private_names.json"
+# PRIVATE_NAMES_FILE overrides the location (Cloud Run mounts it from Secret Manager).
+_PRIVATE = Path(os.environ.get("PRIVATE_NAMES_FILE") or HERE / "private_names.json")
 if not _PRIVATE.exists():
     raise SystemExit(f"Missing {_PRIVATE}. Copy private_names.example.json and fill it in.")
 _names = json.loads(_PRIVATE.read_text(encoding="utf-8"))

@@ -55,7 +55,7 @@ gcloud config set project $PROJECT
 
 ```bash
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com \
-  secretmanager.googleapis.com storage.googleapis.com
+  secretmanager.googleapis.com storage.googleapis.com cloudscheduler.googleapis.com
 ```
 
 ### 2. Create the app's own identity (service account)
@@ -89,13 +89,22 @@ gcloud secrets create anthropic-api-key --data-file=-
 python3 -c "import secrets;print(secrets.token_urlsafe(48),end='')" | \
   gcloud secrets create admin-session-secret --data-file=-
 
-# Partner access codes, "partner:code" pairs separated by commas (Ctrl+D when done)
-gcloud secrets create partner-access-codes --data-file=-
-
 # Internal names the bot must never reveal
 gcloud secrets create internal-terms --data-file=internal_terms.txt
 
-for s in anthropic-api-key admin-session-secret partner-access-codes internal-terms; do
+# Lets Cloud Scheduler start the scheduled jobs (random, generated here; keep a copy for step 9)
+python3 -c "import secrets;print(secrets.token_urlsafe(32),end='')" | gcloud secrets create cron-secret --data-file=-
+
+# Read-only GitHub token for repo sources (org-approved fine-grained token, Contents: read)
+gcloud secrets create github-token --data-file=-
+
+# Google sign-ins made on a laptop: Gmail (gap / insights emails) and Google Chat (Chat sources)
+python scripts/connect_gmail.py                     # creates chat_export/gmail_token.json
+gcloud secrets create gmail-token --data-file=chat_export/gmail_token.json
+gcloud secrets create gchat-token --data-file=chat_export/token.json
+gcloud secrets create private-names --data-file=chat_export/private_names.json
+
+for s in anthropic-api-key admin-session-secret internal-terms cron-secret github-token gmail-token gchat-token private-names; do
   gcloud secrets add-iam-policy-binding $s \
     --member=serviceAccount:$SA_EMAIL --role=roles/secretmanager.secretAccessor
 done
@@ -110,8 +119,9 @@ Pick partner codes that are long and random (for example `acme:` followed by the
 cp deploy/env.example.yaml deploy/env.yaml
 ```
 
-Edit `deploy/env.yaml`: set `KNOWLEDGE_BUCKET` to your bucket name and `GOOGLE_CLIENT_ID`
-to the admin sign-in client ID. `deploy/env.yaml` is git-ignored.
+Edit `deploy/env.yaml`: set `KNOWLEDGE_BUCKET` to your bucket name, `GOOGLE_CLIENT_ID`,
+`ADMIN_EMAILS`, `DEFAULT_TEAMS` and `PUBLIC_URL` (fill it in after the first deploy, then
+deploy again). `deploy/env.yaml` is git-ignored.
 
 ### 6. Deploy
 
@@ -119,10 +129,10 @@ to the admin sign-in client ID. `deploy/env.yaml` is git-ignored.
 gcloud run deploy $SERVICE --source . --region $REGION \
   --service-account $SA_EMAIL \
   --env-vars-file deploy/env.yaml \
-  --set-secrets "ANTHROPIC_API_KEY=anthropic-api-key:latest,ADMIN_SESSION_SECRET=admin-session-secret:latest,ACCESS_CODES=partner-access-codes:latest,/secrets/terms/internal_terms.txt=internal-terms:latest" \
+  --set-secrets "ANTHROPIC_API_KEY=anthropic-api-key:latest,ADMIN_SESSION_SECRET=admin-session-secret:latest,CRON_SECRET=cron-secret:latest,GITHUB_TOKEN=github-token:latest,/secrets/terms/internal_terms.txt=internal-terms:latest,/secrets/gmail/gmail_token.json=gmail-token:latest,/secrets/gchat/token.json=gchat-token:latest,/secrets/names/private_names.json=private-names:latest" \
   --allow-unauthenticated \
-  --min-instances 0 --max-instances 1 \
-  --memory 1Gi --cpu 1 --timeout 300 --concurrency 40
+  --min-instances 1 --max-instances 1 --no-cpu-throttling \
+  --memory 2Gi --cpu 1 --timeout 300 --concurrency 40
 ```
 
 - `--source .` builds the image with Cloud Build from the `Dockerfile`. `.gcloudignore` keeps
@@ -130,16 +140,22 @@ gcloud run deploy $SERVICE --source . --region $REGION \
 - `--allow-unauthenticated` lets partners reach the page; the app's own access codes protect
   it. If your organisation blocks public services, ask the platform team for an exception or
   put it behind a load balancer.
-- `--max-instances 1` because rate limits and blocks are kept in memory (pilot). Raise it
-  after moving them to Redis.
+- `--max-instances 1` because rate limits, blocks and the job queue are kept in memory (pilot).
+  Raise it after moving them to Redis.
+- `--min-instances 1 --no-cpu-throttling`: repo builds, gap drafts and insights run in the
+  background after a request returns, so the instance must stay up with CPU (small always-on cost).
+- `--memory 2Gi`: repo builds download and read whole repos.
 - `--timeout 300` allows long streamed answers.
 
 It prints the service URL, for example `https://partner-assistant-xxxxx-el.a.run.app`.
 
-### 7. Finish admin sign-in
+### 7. Finish Google sign-in
 
-In Google Cloud console → APIs & Services → Credentials → your OAuth client → **Authorized
-JavaScript origins**, add the service URL (no trailing slash). Wait a few minutes.
+1. Google Cloud console → APIs & Services → Credentials → your OAuth web client → **Authorized
+   JavaScript origins**: add the service URL (no trailing slash). Wait a few minutes.
+2. **OAuth consent screen:** partners sign in with their own Google accounts, so the user type
+   must be **External** and the app **published** (In production). With "Internal" only company
+   accounts can sign in; with "Testing" only listed test users can.
 
 ### 8. Check it
 
@@ -150,7 +166,19 @@ gcloud run services logs read $SERVICE --region $REGION --limit 30
 ```
 
 In the logs, look for `Loaded documentation (... chars), provider=anthropic`. Then open the URL,
-sign in with a partner code and ask a question, and open `$URL/admin` and sign in with Google.
+sign in with Google (a company account should show "Internal" and the team picker), ask a
+question, and open `$URL/admin` and sign in with a super admin account. Then do step 9.
+
+### 9. Schedule the jobs (Cloud Scheduler)
+
+One job that wakes the app every 15 minutes; the app then runs whatever is due (repo and Chat
+refreshes, daily gap drafts, the weekly insights report), each on its own admin-set schedule.
+
+```bash
+gcloud scheduler jobs create http assistant-tick --location $REGION --schedule "*/15 * * * *" \
+  --uri "$URL/api/cron/tick" --http-method POST \
+  --headers "X-Cron-Secret=$(gcloud secrets versions access latest --secret cron-secret)"
+```
 
 ---
 

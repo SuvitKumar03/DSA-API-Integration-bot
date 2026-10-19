@@ -142,6 +142,8 @@ DELTA_MAX_CHARS = int(os.getenv("DELTA_MAX_CHARS", "200000"))
 # Google Chat: the OAuth token of the admin who signed in once with
 # `python chat_export/export_gchat.py --list-spaces` (reads the spaces that person is in).
 GCHAT_TOKEN_FILE = Path(os.getenv("GCHAT_TOKEN_FILE", ROOT_DIR / "chat_export" / "token.json"))
+# Who asks and who answers in the Chat groups (chat_export/private_names.example.json).
+PRIVATE_NAMES_FILE = Path(os.getenv("PRIVATE_NAMES_FILE", ROOT_DIR / "chat_export" / "private_names.json"))
 # Timeout for one document-writing AI call.
 DOC_AI_TIMEOUT_SECONDS = int(os.getenv("DOC_AI_TIMEOUT_SECONDS", "900"))
 # Internal knowledge added to an internal user's question (the most relevant parts only).

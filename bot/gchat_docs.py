@@ -63,8 +63,8 @@ def doc_name(space: str, team: str | None = None) -> str:
 
 def _modules():
     """The chat_export scripts, loaded only when needed (clean_chat needs the private names file)."""
-    if not (EXPORT_DIR / "private_names.json").exists():
-        raise SourceError("chat_export/private_names.json is missing (who asks and who answers in the "
+    if not config.PRIVATE_NAMES_FILE.exists():
+        raise SourceError(f"{config.PRIVATE_NAMES_FILE} is missing (who asks and who answers in the "
                           "group). Copy private_names.example.json and fill it in.")
     from chat_export import clean_chat, export_gchat
     return export_gchat, clean_chat
@@ -86,7 +86,10 @@ def _service():
         creds = Credentials.from_authorized_user_file(str(path), export_gchat.SCOPES)
         if not creds.valid:
             creds.refresh(Request())
-            path.write_text(creds.to_json())
+            try:
+                path.write_text(creds.to_json())
+            except OSError:
+                pass          # read-only secret mount (Cloud Run): the refreshed token lives in memory
     except Exception as e:
         raise SourceError(f"{hint} ({type(e).__name__})")
     return export_gchat, build("chat", "v1", credentials=creds), build("people", "v1", credentials=creds)
