@@ -73,7 +73,8 @@ Use `localhost`, not `127.0.0.1` (Google sign-in origin). Private files come in
 | `bot/teams.py` | Team registry (`teams/registry.json`, seeded from DEFAULT_TEAMS in .env); `admin_teams(email)`, `is_super_email` |
 | `bot/gaps.py` | Gaps: `GapCatcher` strips `[[GAP: ...]]` from answers; records per bucket (team / shared / partner); daily `run_bucket` (group → research docs + GitHub code search → draft JSON → proposals → email) |
 | `bot/analytics.py` | `record()` one JSON per interaction (`analytics/events/`); weekly `run()` (code numbers + AI notes per batch + report) then deletes the events |
-| `bot/stats.py` | Daily counters per bucket (`stats/daily/<date>.json`): asked, answered, gaps, cached, off_topic, spam, errors, up, down; `GET /api/admin/stats?days=` |
+| `bot/stats.py` | Daily counters per bucket (`stats/daily/<date>.json`): asked, answered, gaps, cached, off_topic, spam, errors, up, down, strikes, blocks, plus `_users` (by email), `_reasons`, hour arrays; `summary()` for /admin, `dashboard()` for `/dashboard` (`GET /api/admin/dashboard?days=&list=`) |
+| `app/static/dashboard.html` | `/dashboard`: tiles, inline-SVG charts (validated palette, light/dark), users table, blocked now |
 | `bot/answer_cache.py` | Cache of first answers keyed by version + audience + team + normalised question; checked in `/api/chat` before spam checks and the AI |
 | `bot/mailer.py` | Gmail API send-only (`GMAIL_TOKEN_FILE` from `scripts/connect_gmail.py`) |
 | `bot/blobs.py` | App data storage (users, sources): `DATA_DIR` or GCS (`DATA_BUCKET`/`DATA_PREFIX`) |

@@ -393,6 +393,19 @@ weekly insights): asked, answered from the docs, gaps, 👍 / 👎, off-topic / 
 errors. Today / 7 days / 30 days / all time. Team admins see their team; super admins every list.
 Stored in `stats/daily/<date>.json` (`bot/stats.py`).
 
+### 14. Dashboard (`/dashboard`)
+
+For admins (same sign-in as `/admin`); team admins see only their teams, super admins everything.
+Filters: team / list and period (today, 7, 30, 90 days, all time).
+
+- Tiles: questions asked, users interacted, answered from the docs, missed (gaps), times users
+  misbehaved (strikes), times a user was blocked, users blocked, blocked right now, 👎, cached.
+- Charts (hover for numbers, "Show numbers" for a table): questions per day (answered / gaps /
+  other), strikes and blocks per day, strikes and blocks by hour of day, strikes by reason.
+- Users table with email: questions, answered, missed, strikes, times blocked, 👎, active days,
+  last active. Search by email, sort by any column.
+- Kept permanently in the daily counters (`bot/stats.py`), not cleared by the weekly insights.
+
 ### Files
 
 | File | What it does | AI? |
@@ -403,7 +416,8 @@ Stored in `stats/daily/<date>.json` (`bot/stats.py`).
 | `bot/users.py` | Who is internal; each user's saved chats and memory | No |
 | `bot/teams.py` | Teams, super admins and team admins | No |
 | `bot/analytics.py` | Interaction records, weekly AI report, flush | 🤖 Yes (report) |
-| `bot/stats.py` | Daily question counters for the admin page | No |
+| `bot/stats.py` | Daily counters (questions, strikes, blocks, per user) for the admin page and `/dashboard` | No |
+| `app/static/dashboard.html` | The dashboard page (inline SVG charts) | No |
 | `bot/answer_cache.py` | Saved answers for repeated first questions | No |
 | `bot/gaps.py` | Gap marker, gap records, daily grouping, research and drafts, proposals | 🤖 Yes |
 | `bot/mailer.py`, `scripts/connect_gmail.py` | Sends gap emails from the connected Gmail account | No |

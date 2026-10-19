@@ -100,6 +100,11 @@ def _subjects(request: Request, user: User | None = None) -> list[str]:
 USER_COOKIE = "user_session"
 
 
+def _user_label(user: User) -> str:
+    """How a user appears on the admin dashboard."""
+    return user.email if user.method == "google" else f"partner code: {user.name}" if user.method == "code" else "local user"
+
+
 def _is_local(request: Request) -> bool:
     return bool(request.client) and request.client.host in ("127.0.0.1", "::1", "testclient")
 
@@ -191,6 +196,11 @@ def index() -> FileResponse:
 @app.get("/admin")
 def admin_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "admin.html")
+
+
+@app.get("/dashboard")
+def dashboard_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "dashboard.html")
 
 
 @app.get("/healthz")
@@ -366,6 +376,7 @@ async def chat(req: ChatRequest, request: Request, x_access_code: str | None = H
         })
 
     bucket = gaps.bucket_for(user.is_internal, team)      # for the admin page counts (bot/stats.py)
+    who = _user_label(user)
 
     # Answer cache: a first question asked before (same audience, team, knowledge) needs no AI call.
     first_turn = len(history) == 1
@@ -377,7 +388,7 @@ async def chat(req: ChatRequest, request: Request, x_access_code: str | None = H
         _log(text, cached=True)
         analytics.record("chat", audience=audience, team=team, user=user.uid, conversation=cid, turn=1,
                          question=question["content"], answer=text, cached=True, latency_s=0)
-        stats.bump(bucket, asked=1, answered=1, cached=1)
+        stats.bump(bucket, who, asked=1, answered=1, cached=1)
         return PlainTextResponse(text, headers={"X-Message-Id": message_id, "Cache-Control": "no-cache", "X-Answer": "cached"})
 
     # Cheap spam checks first: these never reach the AI.
@@ -386,6 +397,7 @@ async def chat(req: ChatRequest, request: Request, x_access_code: str | None = H
         reason = "manipulation"
     if reason:
         strikes, until = guard.strike(subjects, reason)
+        stats.bump(bucket, who, reason=reason, strikes=1, blocks=int(bool(until)))
         log.warning("Strike (%s) for %s: %d in window%s", reason, subjects, strikes, ", BLOCKED" if until else "")
         if until:
             _log("", spam=reason, strikes=strikes, blocked=True)
@@ -395,7 +407,7 @@ async def chat(req: ChatRequest, request: Request, x_access_code: str | None = H
             _log(text, spam=reason, strikes=strikes)
             analytics.record("spam", reason=reason, audience=audience, team=team, user=user.uid,
                              question=question["content"])
-            stats.bump(bucket, asked=1, spam=1)
+            stats.bump(bucket, who, asked=1, spam=1)
             return PlainTextResponse(text, headers={"X-Message-Id": message_id, "Cache-Control": "no-cache"})
         # Manipulation attempts still get an answer: the AI declines politely.
 
@@ -434,6 +446,7 @@ async def chat(req: ChatRequest, request: Request, x_access_code: str | None = H
             tail = redactor.feed(catcher.flush()) + redactor.flush()
             if off_topic:
                 strikes, until = guard.strike(subjects, "off_topic")
+                stats.bump(bucket, who, reason="off_topic", strikes=1, blocks=int(bool(until)))
                 log.warning("Strike (off_topic) for %s: %d in window%s", subjects, strikes, ", BLOCKED" if until else "")
                 tail += _strike_note(strikes, until)
             elif reason == "manipulation":
@@ -469,7 +482,7 @@ async def chat(req: ChatRequest, request: Request, x_access_code: str | None = H
                          latency_s=round(time.time() - started, 2), tokens=usage.get("output_tokens"),
                          message_id=message_id)
         failed = not answer.strip() or any(t in answer for t in (ERROR_TEXT, REFUSAL_TEXT, "Local setup issue"))
-        stats.bump(bucket, asked=1, gaps=int(bool(catcher.topic) and not off_topic), off_topic=int(off_topic),
+        stats.bump(bucket, who, asked=1, gaps=int(bool(catcher.topic) and not off_topic), off_topic=int(off_topic),
                    spam=int(reason == "manipulation"), errors=int(failed),
                    answered=int(not (catcher.topic or off_topic or reason or failed)))
         # Only clean, complete first answers are reused.
@@ -505,7 +518,7 @@ def feedback(fb: Feedback, request: Request, x_access_code: str | None = Header(
                      comment=fb.comment, conversation=fb.conversation_id)
     fb_conv = users.get_conversation(user, fb.conversation_id) if fb.conversation_id else None
     stats.bump(gaps.bucket_for(user.is_internal, (fb_conv or {}).get("team") if user.is_internal else None),
-               **{fb.rating: 1})
+               _user_label(user), **{fb.rating: 1})
     conv = users.get_conversation(user, fb.conversation_id) if fb.rating == "down" and fb.conversation_id else None
     msgs = (conv or {}).get("messages", [])
     at = next((i for i, m in enumerate(msgs) if m.get("id") == fb.message_id), None)
@@ -811,6 +824,9 @@ def admin_audit(request: Request, limit: int = 100) -> dict:
 
 # ---------------------------------------------------------------- admin: blocked users
 
+MANUAL_BUCKET = "_manual"       # blocks set by hand on the admin page (super admins' dashboard)
+
+
 class BlockChange(BaseModel):
     subject: str = Field(pattern=r"^(ip|cid|user):[\w.:@+-]{1,120}$")
     note: str = Field(default="", max_length=500)
@@ -840,6 +856,8 @@ def admin_unblock(req: BlockChange, request: Request) -> dict:
 def admin_block(req: BlockChange, request: Request) -> dict:
     who = _super(request)
     until = guard.block([req.subject], f"manual: {req.note or 'by admin'}", by=who["admin"])
+    stats.bump(MANUAL_BUCKET, req.subject.split(":", 1)[1] if req.subject.startswith("user:") else req.subject,
+               reason="manual", blocks=1)
     _audit(request, "block", who, subject=req.subject, note=req.note, until=until)
     return {"ok": True, "until": until}
 
@@ -1140,6 +1158,25 @@ def admin_stats(request: Request, days: int = 7) -> dict:
     out = stats.summary(buckets, days if days > 0 else None)
     out["names"] = {b: gaps.bucket_name(b) for b in buckets}
     return out
+
+
+# ---------------------------------------------------------------- admin: dashboard (/dashboard)
+# Team admins see their teams' numbers and users; super admins every list, plus manual blocks.
+
+@app.get("/api/admin/dashboard")
+def admin_dashboard(request: Request, days: int = 7, list: str = "all") -> dict:
+    who = _admin(request)
+    allowed = who["teams"] + ([gaps.SHARED, gaps.PARTNER, MANUAL_BUCKET] if who["super"] else [])
+    if list != "all" and list not in allowed:
+        raise HTTPException(status_code=404, detail="No such list")
+    out = stats.dashboard(allowed if list == "all" else [list], days if days > 0 else None)
+    emails = {u["email"] for u in out["users"]}
+    blocked = [b for b in guard.list_blocks()
+               if who["super"] or (b["subject"].startswith("user:") and b["subject"][5:] in emails)]
+    names = {b: gaps.bucket_name(b) for b in allowed if b != MANUAL_BUCKET}
+    names[MANUAL_BUCKET] = "Blocked by an admin"
+    return {**out, "blocked_now": blocked, "names": names, "lists": [b for b in allowed if b != MANUAL_BUCKET],
+            "super": who["super"], "admin": who["admin"]}
 
 
 # ---------------------------------------------------------------- admin: insights and answer cache (super admins)

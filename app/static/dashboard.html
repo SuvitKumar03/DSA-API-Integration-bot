@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Assistant Dashboard</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* Usage dashboard. Light and dark use their own validated chart colours. */
+  :root {
+    color-scheme: light;
+    --page: #f5f7fb; --surface: #fcfcfb; --card: #ffffff; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --border: #e2e8f0; --accent: #2f5bea; --accent-soft: #eef2ff;
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;          /* answered / gaps / other; strikes / blocks */
+    --good: #006300; --critical: #d03b3b; --shadow: 0 1px 2px rgba(15, 27, 45, .06);
+    --font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface: #1a1a19; --card: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --border: #2c2c2a; --accent: #6d8ff5; --accent-soft: #1d2440;
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70; --good: #0ca30c; --critical: #e66767; --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --card: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: #2c2c2a; --accent: #6d8ff5; --accent-soft: #1d2440;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --good: #0ca30c; --critical: #e66767; --shadow: none;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.5 var(--font); }
+  [hidden] { display: none !important; }
+  header { display: flex; align-items: center; gap: 10px; padding: 14px 24px; background: var(--card); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; }
+  header .who { margin-left: auto; color: var(--muted); font-size: 13px; }
+  header a { color: var(--accent); }
+  .badge { font-size: 11px; font-weight: 600; color: var(--accent); background: var(--accent-soft); padding: 2px 8px; border-radius: 99px; }
+  main { max-width: 1200px; margin: 0 auto; padding: 18px 16px 60px; }
+  .filters { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+  select, input[type=search], input[type=password] { border: 1px solid var(--border); border-radius: 9px; padding: 7px 10px; font: inherit; background: var(--card); color: var(--ink); }
+  .periods { display: flex; gap: 6px; }
+  .periods button { border: 1px solid var(--border); background: var(--card); border-radius: 99px; padding: 5px 12px; font: 500 12.5px var(--font); color: var(--ink-2); cursor: pointer; }
+  .periods button.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+  .since { color: var(--muted); font-size: 12.5px; margin-left: auto; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .tile { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; box-shadow: var(--shadow); }
+  .tile b { display: block; font-size: 24px; font-weight: 600; line-height: 1.2; }
+  .tile span { font-size: 12.5px; color: var(--ink-2); }
+  .tile small { display: block; font-size: 11.5px; color: var(--muted); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+  @media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; box-shadow: var(--shadow); min-width: 0; }
+  .card h2 { font-size: 14px; margin: 0 0 2px; }
+  .card .sub { font-size: 12.5px; color: var(--muted); margin: 0 0 8px; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-2); margin: 0 0 6px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+  .chart { position: relative; width: 100%; }
+  .chart svg { display: block; width: 100%; overflow: visible; }
+  .chart text { font: 11px var(--font); fill: var(--muted); font-variant-numeric: tabular-nums; }
+  .empty { color: var(--muted); font-size: 13px; padding: 30px 0; text-align: center; }
+  .toggle { background: none; border: none; color: var(--accent); font: 12.5px var(--font); padding: 4px 0; cursor: pointer; }
+  .tip { position: fixed; z-index: 50; pointer-events: none; background: var(--card); color: var(--ink); border: 1px solid var(--border);
+         border-radius: 10px; padding: 8px 10px; font-size: 12.5px; box-shadow: 0 6px 20px rgba(0,0,0,.14); min-width: 140px; }
+  .tip .t { font-weight: 600; margin-bottom: 3px; }
+  .tip .r { display: flex; justify-content: space-between; gap: 14px; }
+  .tip i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--border); padding: 7px 8px; white-space: nowrap; background: var(--card); position: sticky; top: 0; z-index: 1; }
+  th.sort { cursor: pointer; user-select: none; } th.sort:hover { color: var(--ink); }
+  td { border-bottom: 1px solid var(--border); padding: 7px 8px; white-space: nowrap; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .scroll { max-height: 520px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
+  .bad { color: var(--critical); font-weight: 600; }
+  .pill { font-size: 11px; border: 1px solid var(--border); border-radius: 99px; padding: 1px 7px; color: var(--ink-2); margin-right: 3px; }
+  .numtable { margin-top: 8px; max-height: 260px; overflow: auto; }
+  .login { max-width: 380px; margin: 14vh auto; background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 28px; text-align: center; }
+  .login h2 { margin: 0 0 6px; } .login p { color: var(--muted); margin: 0 0 16px; }
+  #googleBtn { display: flex; justify-content: center; min-height: 44px; }
+  .err { color: var(--critical); font-size: 13px; margin-top: 10px; }
+  button.btn { border: 1px solid var(--border); background: var(--card); border-radius: 9px; padding: 7px 14px; font: 600 13px var(--font); color: var(--ink-2); cursor: pointer; }
+</style>
+</head>
+<body>
+
+<div class="login" id="login" hidden>
+  <h2>Dashboard</h2>
+  <p>For admins. Sign in with your work Google account.</p>
+  <div id="googleBtn"></div>
+  <form id="codeForm" hidden style="margin-top:14px"><input type="password" id="code" placeholder="Admin code (local only)"> <button class="btn">Sign in</button></form>
+  <div class="err" id="loginErr"></div>
+</div>
+
+<div id="app" hidden>
+  <header>
+    <h1>Assistant dashboard</h1><span class="badge" id="role"></span>
+    <span class="who"><span id="me"></span> · <a href="/admin">Admin page</a></span>
+  </header>
+  <main>
+    <div class="filters">
+      <select id="list" aria-label="Team"></select>
+      <div class="periods" id="periods">
+        <button data-d="1">Today</button><button data-d="7" class="on">7 days</button><button data-d="30">30 days</button><button data-d="90">90 days</button><button data-d="0">All time</button>
+      </div>
+      <span class="since" id="since"></span>
+    </div>
+
+    <div class="tiles" id="tiles"></div>
+
+    <div class="grid2">
+      <section class="card">
+        <h2>Questions per day</h2>
+        <p class="sub">Answered from the docs, gaps (docs had no answer), and other (off-topic, spam, errors)</p>
+        <div class="legend"><span><i style="background:var(--s1)"></i>Answered</span><span><i style="background:var(--s2)"></i>Gaps</span><span><i style="background:var(--s3)"></i>Other</span></div>
+        <div class="chart" id="cQuestions"></div>
+        <button class="toggle" data-table="tQuestions">Show numbers</button><div class="numtable" id="tQuestions" hidden></div>
+      </section>
+      <section class="card">
+        <h2>Strikes and blocks per day</h2>
+        <p class="sub">A strike is misbehaviour (gibberish, repeats, off-topic, manipulation); 5 in 30 minutes block a user for 2 hours</p>
+        <div class="legend"><span><i style="background:var(--s1)"></i>Strikes</span><span><i style="background:var(--s2)"></i>Blocks</span></div>
+        <div class="chart" id="cStrikes"></div>
+        <button class="toggle" data-table="tStrikes">Show numbers</button><div class="numtable" id="tStrikes" hidden></div>
+      </section>
+    </div>
+
+    <div class="grid2">
+      <section class="card">
+        <h2>When misbehaviour happens</h2>
+        <p class="sub">Strikes and blocks by hour of the day (India time), over the selected period</p>
+        <div class="legend"><span><i style="background:var(--s1)"></i>Strikes</span><span><i style="background:var(--s2)"></i>Blocks</span></div>
+        <div class="chart" id="cHours"></div>
+        <button class="toggle" data-table="tHours">Show numbers</button><div class="numtable" id="tHours" hidden></div>
+      </section>
+      <section class="card">
+        <h2>Why strikes were given</h2>
+        <p class="sub">Strikes by reason</p>
+        <div class="chart" id="cReasons"></div>
+      </section>
+    </div>
+
+    <section class="card" style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+        <div><h2>Users</h2><p class="sub" style="margin:0" id="usersSub"></p></div>
+        <input type="search" id="q" placeholder="Search email" style="margin-left:auto;min-width:220px" aria-label="Search users">
+      </div>
+      <div class="scroll"><table id="users"><thead><tr>
+        <th class="sort" data-k="email">User</th><th>Lists</th>
+        <th class="sort num" data-k="asked">Questions</th><th class="sort num" data-k="answered">Answered</th>
+        <th class="sort num" data-k="gaps">Missed (gaps)</th><th class="sort num" data-k="strikes">Strikes</th>
+        <th class="sort num" data-k="blocks">Times blocked</th><th class="sort num" data-k="down">👎</th>
+        <th class="sort num" data-k="days">Active days</th><th class="sort" data-k="last">Last active</th>
+      </tr></thead><tbody></tbody></table></div>
+    </section>
+
+    <section class="card">
+      <h2>Blocked right now</h2>
+      <p class="sub">Blocks end by themselves after 2 hours. A super admin can unblock on the <a href="/admin">admin page</a> (Blocked users).</p>
+      <div style="overflow:auto"><table id="blocked"><thead><tr><th>Who</th><th>Until</th><th>Reason</th><th>By</th></tr></thead><tbody></tbody></table></div>
+    </section>
+  </main>
+</div>
+
+<div class="tip" id="tip" hidden></div>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+let code = sessionStorage.getItem("adminCode") || "";
+let days = 7, data = null, sortKey = "asked", sortDir = -1;
+
+async function call(path, body) {
+  const res = await fetch(path, { method: body ? "POST" : "GET", credentials: "same-origin",
+    headers: { "Content-Type": "application/json", ...(code ? { "X-Admin-Code": code } : {}) },
+    body: body ? JSON.stringify(body) : undefined });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(d.detail || `Error ${res.status}`);
+  return d;
+}
+
+/* ---------- tooltip ---------- */
+const tip = $("tip");
+function showTip(e, title, rows) {
+  tip.innerHTML = `<div class="t">${esc(title)}</div>` + rows.map(([c, l, v]) =>
+    `<div class="r"><span>${c ? `<i style="background:${c}"></i>` : ""}${esc(l)}</span><b>${esc(v)}</b></div>`).join("");
+  tip.hidden = false;
+  const x = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8), y = Math.min(e.clientY + 14, innerHeight - tip.offsetHeight - 8);
+  tip.style.left = x + "px"; tip.style.top = y + "px";
+}
+const hideTip = () => { tip.hidden = true; };
+
+/* ---------- charts (inline SVG) ---------- */
+const NS = "http://www.w3.org/2000/svg";
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+// Round axis steps (1, 2, 5, 10, 20, 50 ...): returns {max, step}.
+function niceAxis(v) {
+  const raw = Math.max(1, v) / 4, p = 10 ** Math.floor(Math.log10(raw)), m = raw / p;
+  const step = Math.max(1, (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p);
+  return { step, max: Math.max(step, Math.ceil(Math.max(1, v) / step) * step) };
+}
+function gridY(svg, ax, y, L, W, R) {
+  for (let v = 0; v <= ax.max + 1e-9; v += ax.step) {
+    const yy = y(v);
+    el("line", { x1: L, x2: W - R, y1: yy, y2: yy, stroke: v ? css("--grid") : css("--axis"), "stroke-width": 1 }, svg);
+    el("text", { x: L - 6, y: yy + 3.5, "text-anchor": "end" }, svg).textContent = v;
+  }
+}
+function el(tag, attrs, parent) { const n = document.createElementNS(NS, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); parent?.appendChild(n); return n; }
+function shortDate(d) { const [, m, dd] = d.split("-"); return `${+dd} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][+m - 1]}`; }
+
+// Columns per category: stacked (one column, segments) or grouped (side by side).
+function columns(box, cats, series, { stacked = false, labelOf = (c) => c, height = 220 } = {}) {
+  box.innerHTML = "";
+  if (!cats.length || cats.every((c, i) => series.every((s) => !s.values[i]))) { box.innerHTML = '<div class="empty">Nothing in this period yet.</div>'; return; }
+  const W = box.clientWidth || 500, H = height, L = 34, R = 6, T = 8, B = 24;
+  const tot = cats.map((_, i) => stacked ? series.reduce((a, s) => a + s.values[i], 0) : Math.max(...series.map((s) => s.values[i])));
+  const ax = niceAxis(Math.max(...tot)), max = ax.max, y = (v) => T + (H - T - B) * (1 - v / max);
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img" }, box);
+  gridY(svg, ax, y, L, W, R);
+  const band = (W - L - R) / cats.length, colW = Math.max(3, Math.min(28, band * (stacked ? 0.62 : 0.8)));
+  const every = Math.ceil(cats.length / Math.max(1, Math.floor((W - L - R) / 46)));
+  cats.forEach((c, i) => {
+    const cx = L + band * i + band / 2;
+    if (i % every === 0) el("text", { x: cx, y: H - 6, "text-anchor": "middle" }, svg).textContent = labelOf(c);
+    if (stacked) {
+      let base = 0;
+      const vis = series.filter((s) => s.values[i] > 0), top = vis[vis.length - 1];
+      for (const s of series) {
+        const v = s.values[i]; if (!v) continue;
+        const y1 = y(base + v), y0 = y(base), h = Math.max(1, y0 - y1 - (base ? 2 : 0));   // 2px surface gap between segments
+        bar(svg, cx - colW / 2, y1, colW, h, s.color, s === top);
+        base += v;
+      }
+    } else {
+      const w = colW / series.length;
+      series.forEach((s, j) => { const v = s.values[i]; if (v) bar(svg, cx - colW / 2 + j * w + 1, y(v), Math.max(2, w - 2), y(0) - y(v), s.color, true); });
+    }
+    const hit = el("rect", { x: L + band * i, y: T, width: band, height: H - T - B, fill: "transparent" }, svg);
+    hit.addEventListener("mousemove", (e) => showTip(e, labelOf(c, true), series.map((s) => [s.color, s.name, s.values[i]])
+      .concat(stacked ? [[null, "Total", tot[i]]] : [])));
+    hit.addEventListener("mouseleave", hideTip);
+  });
+}
+// A bar with a 4px rounded end at the top, square at the baseline.
+function bar(svg, x, y, w, h, fill, roundTop) {
+  const r = roundTop ? Math.min(4, w / 2, h) : 0;
+  el("path", { d: `M${x},${y + h} V${y + r} Q${x},${y} ${x + r},${y} H${x + w - r} Q${x + w},${y} ${x + w},${y + r} V${y + h} Z`, fill }, svg);
+}
+// Lines with markers, one axis, crosshair tooltip.
+function lines(box, cats, series, { labelOf = (c) => c, height = 220 } = {}) {
+  box.innerHTML = "";
+  if (!cats.length || series.every((s) => s.values.every((v) => !v))) { box.innerHTML = '<div class="empty">No strikes or blocks in this period. 🎉</div>'; return; }
+  const W = box.clientWidth || 500, H = height, L = 34, R = 10, T = 10, B = 24;
+  const ax = niceAxis(Math.max(...series.flatMap((s) => s.values))), max = ax.max, y = (v) => T + (H - T - B) * (1 - v / max);
+  const x = (i) => cats.length === 1 ? (L + W - R) / 2 : L + (W - L - R) * i / (cats.length - 1);
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img" }, box);
+  gridY(svg, ax, y, L, W, R);
+  const every = Math.ceil(cats.length / Math.max(1, Math.floor((W - L - R) / 46)));
+  cats.forEach((c, i) => { if (i % every === 0) el("text", { x: x(i), y: H - 6, "text-anchor": "middle" }, svg).textContent = labelOf(c); });
+  const cross = el("line", { y1: T, y2: H - B, stroke: css("--axis"), "stroke-width": 1, visibility: "hidden" }, svg);
+  for (const s of series) {
+    el("polyline", { points: s.values.map((v, i) => `${x(i)},${y(v)}`).join(" "), fill: "none", stroke: s.color, "stroke-width": 2, "stroke-linejoin": "round" }, svg);
+    s.values.forEach((v, i) => { if (v) el("circle", { cx: x(i), cy: y(v), r: 4, fill: s.color, stroke: css("--surface"), "stroke-width": 2 }, svg); });
+  }
+  const hit = el("rect", { x: L, y: T, width: W - L - R, height: H - T - B, fill: "transparent" }, svg);
+  hit.addEventListener("mousemove", (e) => {
+    const r = svg.getBoundingClientRect(), px = (e.clientX - r.left) * W / r.width;
+    const i = Math.max(0, Math.min(cats.length - 1, Math.round((px - L) / ((W - L - R) / Math.max(1, cats.length - 1)))));
+    cross.setAttribute("x1", x(i)); cross.setAttribute("x2", x(i)); cross.setAttribute("visibility", "visible");
+    showTip(e, labelOf(cats[i], true), series.map((s) => [s.color, s.name, s.values[i]]));
+  });
+  hit.addEventListener("mouseleave", () => { hideTip(); cross.setAttribute("visibility", "hidden"); });
+}
+// Horizontal bars, one colour, value labels at the end.
+function hbars(box, items) {
+  box.innerHTML = "";
+  if (!items.length) { box.innerHTML = '<div class="empty">No strikes in this period.</div>'; return; }
+  const W = box.clientWidth || 500, row = 30, H = items.length * row + 6, L = 150, R = 40;
+  const max = Math.max(...items.map((i) => i.value)), svg = el("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img" }, box);
+  items.forEach((it, k) => {
+    const yy = k * row + 6, w = Math.max(2, (W - L - R) * it.value / max);
+    el("text", { x: L - 8, y: yy + 14, "text-anchor": "end", style: `fill:${css("--ink-2")}` }, svg).textContent = it.label;
+    el("path", { d: `M${L},${yy + 4} H${L + w - 4} Q${L + w},${yy + 4} ${L + w},${yy + 8} V${yy + 16} Q${L + w},${yy + 20} ${L + w - 4},${yy + 20} H${L} Z`, fill: css("--s1") }, svg);
+    el("text", { x: L + w + 6, y: yy + 16, style: `fill:${css("--ink-2")}` }, svg).textContent = it.value;
+  });
+}
+function numTable(box, head, rows) {
+  box.innerHTML = `<table><thead><tr>${head.map((h, i) => `<th class="${i ? "num" : ""}">${esc(h)}</th>`).join("")}</tr></thead><tbody>`
+    + rows.map((r) => `<tr>${r.map((v, i) => `<td class="${i ? "num" : ""}">${esc(v)}</td>`).join("")}</tr>`).join("") + "</tbody></table>";
+}
+
+/* ---------- render ---------- */
+const REASONS = { off_topic: "Off-topic", gibberish: "Gibberish", repeat: "Same question 3×", manipulation: "Manipulation attempt", manual: "Blocked by an admin", other: "Other" };
+function render() {
+  const d = data, t = d.total;
+  $("since").textContent = d.since ? `Counting since ${shortDate(d.since)}` : "";
+  const tile = (v, label, note = "", cls = "") => `<div class="tile"><b class="${cls}">${v ?? 0}</b><span>${label}</span>${note ? `<small>${note}</small>` : ""}</div>`;
+  $("tiles").innerHTML = tile(t.asked, "questions asked") + tile(t.users, "users interacted")
+    + tile(t.answered, "answered from the docs", t.answered_pct != null ? `${t.answered_pct}% of questions` : "")
+    + tile(t.gaps, "missed (docs had no answer)", t.asked ? `${Math.round(100 * t.gaps / t.asked)}% of questions` : "")
+    + tile(t.strikes, "times users misbehaved", "strikes given") + tile(t.blocks, "times a user was blocked", "2-hour blocks", t.blocks ? "bad" : "")
+    + tile(t.blocked_users, "users blocked", "at least once") + tile(d.blocked_now.length, "blocked right now", "", d.blocked_now.length ? "bad" : "")
+    + tile(t.down, "👎 answers") + tile(t.cached, "answered from cache", "no AI call");
+  const cats = d.per_day.map((x) => x.date), lab = (c, long) => long ? new Date(c + "T00:00").toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }) : shortDate(c);
+  const other = d.per_day.map((x) => Math.max(0, x.asked - x.answered - x.gaps));
+  columns($("cQuestions"), cats, [
+    { name: "Answered", color: css("--s1"), values: d.per_day.map((x) => x.answered) },
+    { name: "Gaps", color: css("--s2"), values: d.per_day.map((x) => x.gaps) },
+    { name: "Other", color: css("--s3"), values: other }], { stacked: true, labelOf: lab });
+  numTable($("tQuestions"), ["Day", "Asked", "Answered", "Gaps", "Other"], d.per_day.map((x, i) => [x.date, x.asked, x.answered, x.gaps, other[i]]));
+  lines($("cStrikes"), cats, [
+    { name: "Strikes", color: css("--s1"), values: d.per_day.map((x) => x.strikes) },
+    { name: "Blocks", color: css("--s2"), values: d.per_day.map((x) => x.blocks) }], { labelOf: lab });
+  numTable($("tStrikes"), ["Day", "Strikes", "Blocks"], d.per_day.map((x) => [x.date, x.strikes, x.blocks]));
+  const hrs = [...Array(24).keys()], hl = (h, long) => long ? `${String(h).padStart(2, "0")}:00–${String(h).padStart(2, "0")}:59` : (h % 3 ? "" : `${h}h`);
+  columns($("cHours"), hrs, [
+    { name: "Strikes", color: css("--s1"), values: d.strike_hours },
+    { name: "Blocks", color: css("--s2"), values: d.block_hours }], { labelOf: hl, height: 200 });
+  numTable($("tHours"), ["Hour", "Strikes", "Blocks"], hrs.filter((h) => d.strike_hours[h] || d.block_hours[h]).map((h) => [hl(h, true), d.strike_hours[h], d.block_hours[h]]));
+  hbars($("cReasons"), Object.entries(d.reasons).map(([k, v]) => ({ label: REASONS[k] || k, value: v })));
+  renderUsers();
+  const bb = $("blocked").querySelector("tbody");
+  bb.innerHTML = d.blocked_now.length ? d.blocked_now.map((b) => `<tr><td>${esc(b.subject.replace(/^user:/, ""))}</td><td>${esc(new Date(b.until * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))}</td><td>${esc(b.reason)}</td><td>${esc(b.by)}</td></tr>`).join("")
+    : '<tr><td colspan="4" style="color:var(--muted)">Nobody is blocked right now.</td></tr>';
+}
+function renderUsers() {
+  const q = $("q").value.trim().toLowerCase();
+  const rows = data.users.filter((u) => !q || u.email.includes(q))
+    .sort((a, b) => (typeof a[sortKey] === "string" ? a[sortKey].localeCompare(b[sortKey]) : a[sortKey] - b[sortKey]) * sortDir);
+  $("usersSub").textContent = `${data.users.length} user${data.users.length === 1 ? "" : "s"} in this period · click a column to sort`;
+  document.querySelectorAll("#users th.sort").forEach((th) => { th.textContent = th.textContent.replace(/ [▲▼]$/, "") + (th.dataset.k === sortKey ? (sortDir < 0 ? " ▼" : " ▲") : ""); });
+  const n = (v, bad) => `<td class="num${bad && v ? " bad" : ""}">${v}</td>`;
+  $("users").querySelector("tbody").innerHTML = rows.length ? rows.map((u) => `<tr><td>${esc(u.email)}</td>
+    <td>${u.lists.map((l) => `<span class="pill">${esc(data.names[l] || l)}</span>`).join("")}</td>
+    ${n(u.asked)}${n(u.answered)}${n(u.gaps)}${n(u.strikes, true)}${n(u.blocks, true)}${n(u.down)}${n(u.days)}
+    <td>${u.last ? esc(new Date(u.last).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })) : "-"}</td></tr>`).join("")
+    : '<tr><td colspan="10" style="color:var(--muted)">No users match.</td></tr>';
+}
+async function load() {
+  data = await call(`/api/admin/dashboard?days=${days}&list=${encodeURIComponent($("list").value || "all")}`);
+  render();
+}
+
+/* ---------- controls ---------- */
+document.querySelectorAll("#periods button").forEach((b) => b.onclick = () => {
+  days = +b.dataset.d; document.querySelectorAll("#periods button").forEach((x) => x.classList.toggle("on", x === b)); load();
+});
+$("list").onchange = load;
+$("q").oninput = renderUsers;
+document.querySelectorAll("#users th.sort").forEach((th) => th.onclick = () => {
+  sortDir = sortKey === th.dataset.k ? -sortDir : (th.dataset.k === "email" ? 1 : -1); sortKey = th.dataset.k; renderUsers();
+});
+document.querySelectorAll(".toggle").forEach((b) => b.onclick = () => {
+  const t = $(b.dataset.table); t.hidden = !t.hidden; b.textContent = t.hidden ? "Show numbers" : "Hide numbers";
+});
+let resizeTimer;
+new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => data && render(), 150); }).observe(document.body);
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => data && render());
+
+/* ---------- sign-in (same admin accounts as /admin) ---------- */
+async function start() {
+  try {
+    const me = await call("/api/admin/me");
+    $("me").textContent = me.admin;
+    $("role").textContent = me.super ? "SUPER ADMIN" : "TEAM ADMIN";
+    const first = await call(`/api/admin/dashboard?days=${days}`);
+    $("list").innerHTML = `<option value="all">${me.super ? "Everything" : "All my teams"}</option>`
+      + first.lists.map((l) => `<option value="${esc(l)}">${esc(first.names[l] || l)}</option>`).join("");
+    $("list").hidden = first.lists.length < 2 && !me.super;
+    data = first;
+    $("login").hidden = true; $("app").hidden = false;
+    render();
+    return true;
+  } catch { return false; }
+}
+async function setupLogin() {
+  $("login").hidden = false;
+  const cfg = await fetch("/api/admin/auth-config").then((r) => r.json()).catch(() => ({}));
+  $("codeForm").hidden = !cfg.codesEnabled;
+  if (!cfg.googleClientId) return;
+  const ready = () => {
+    google.accounts.id.initialize({ client_id: cfg.googleClientId, callback: async (resp) => {
+      try { await call("/api/admin/google-login", { credential: resp.credential }); if (!(await start())) $("loginErr").textContent = "Couldn't load the dashboard."; }
+      catch (e) { $("loginErr").textContent = e.message; }
+    } });
+    google.accounts.id.renderButton($("googleBtn"), { theme: "outline", size: "large", text: "signin_with", width: 300 });
+  };
+  if (window.google?.accounts?.id) ready(); else { const t = setInterval(() => { if (window.google?.accounts?.id) { clearInterval(t); ready(); } }, 100); }
+}
+$("codeForm").onsubmit = async (e) => {
+  e.preventDefault(); code = $("code").value.trim();
+  if (await start()) sessionStorage.setItem("adminCode", code); else { code = ""; $("loginErr").textContent = "That admin code isn't valid."; }
+};
+(async () => { if (!(await start())) await setupLogin(); })();
+</script>
+</body>
+</html>
