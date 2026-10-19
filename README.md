@@ -513,6 +513,8 @@ To share the private files with a teammate: `scripts/pack-private.sh` creates `p
 
 ## Deploy
 
+**Before deploying, read the checklist: [docs/DEPLOY_CHECKLIST.md](docs/DEPLOY_CHECKLIST.md)** (what is needed and why).
+
 **Google Cloud (Cloud Run): step-by-step guide in [docs/deploy-gcp.md](docs/deploy-gcp.md).** Docs live in a private
 Cloud Storage bucket, secrets (API key, partner codes, internal terms) in Secret Manager, admins sign in with Google.
 In the cloud the AI must be the Claude API (or Gemini); `PROVIDER=claude_code` is for personal machines only.

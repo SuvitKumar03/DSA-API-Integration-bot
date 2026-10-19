@@ -8,6 +8,8 @@ Admins ──/admin (Google sign-in)──┘      │                          
                                          └── Claude API (Anthropic) ── answers
 ```
 
+Start with the checklist of what's needed and why: [DEPLOY_CHECKLIST.md](DEPLOY_CHECKLIST.md).
+
 ## Before you start
 
 **Which AI answers in the cloud.** `PROVIDER=claude_code` (your own Claude subscription) only
