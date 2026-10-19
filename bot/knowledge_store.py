@@ -6,7 +6,11 @@ Two backends, chosen by KNOWLEDGE_BACKEND:
            service account reads and writes the bucket, so no keys are handed out.
 
 Layout (same in both):
-    <name>.md                    the live knowledge files
+    <name>.md                    the live partner-facing knowledge files
+    internal/<team>/<kind>/<name>.md   one team's internal knowledge (repo docs, Google Chat docs,
+                                 notes; see bot/teams.py), shown only to internal users
+    internal/<kind>/<name>.md    internal knowledge shared by all teams
+    Internal files are never loaded into a partner's prompt.
     _version.json                bumped on every change; bot instances poll it to reload
     _history/<name>/<ts>.md      the previous content of a file, saved before each change
     _audit/...                   who changed what and when (append-only audit trail)
@@ -23,6 +27,8 @@ from pathlib import Path
 from bot import config
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,80}\.md$")
+INTERNAL_RE = re.compile(r"^internal/(?:([a-z][a-z0-9-]{1,30})/)?(?:repos|gchat|notes)/[A-Za-z0-9][A-Za-z0-9_.-]{0,120}\.md$")
+INTERNAL_DIR = "internal"
 EXCLUDED = {"README.md"}           # folder notes for people, not knowledge for the bot
 VERSION_FILE = "_version.json"
 HISTORY_DIR = "_history"
@@ -31,7 +37,17 @@ LAST_FILE = "_last_modified.json"
 
 
 def valid_name(name: str) -> bool:
-    return bool(NAME_RE.match(name)) and name not in EXCLUDED
+    return (bool(NAME_RE.match(name)) and name not in EXCLUDED) or is_internal_name(name)
+
+
+def is_internal_name(name: str) -> bool:
+    return bool(INTERNAL_RE.match(name)) and ".." not in name
+
+
+def team_of(name: str) -> str | None:
+    """The team folder of an internal file (None = shared by all teams, or not internal)."""
+    m = INTERNAL_RE.match(name)
+    return m.group(1) if m else None
 
 
 def _stamp() -> str:
@@ -45,6 +61,11 @@ class LocalStore:
     def names(self) -> list[str]:
         return sorted(p.name for p in self.root.glob("*.md") if valid_name(p.name))
 
+    def internal_names(self) -> list[str]:
+        d = self.root / INTERNAL_DIR
+        names = (p.relative_to(self.root).as_posix() for p in d.rglob("*.md")) if d.is_dir() else ()
+        return sorted(n for n in names if is_internal_name(n))
+
     def read(self, name: str) -> str | None:
         p = self.root / name
         return p.read_text(encoding="utf-8") if p.exists() else None
@@ -54,7 +75,8 @@ class LocalStore:
         # edited by hand.
         p = self.root / VERSION_FILE
         admin = json.loads(p.read_text(encoding="utf-8"))["version"] if p.exists() else "0"
-        newest = max((f.stat().st_mtime_ns for f in self.root.glob("*.md")), default=0)
+        files = [*self.root.glob("*.md"), *self.root.glob(f"{INTERNAL_DIR}/**/*.md")]
+        newest = max((f.stat().st_mtime_ns for f in files), default=0)
         return f"{admin}-{newest}"
 
     def write(self, name: str, text: str, by: str) -> tuple[str, str | None]:
@@ -65,7 +87,20 @@ class LocalStore:
             hist.mkdir(parents=True, exist_ok=True)
             saved = _stamp()
             (hist / f"{saved}.md").write_text(old, encoding="utf-8")
+        (self.root / name).parent.mkdir(parents=True, exist_ok=True)
         (self.root / name).write_text(text, encoding="utf-8")
+        return self._bump(name, by), saved
+
+    def remove(self, name: str, by: str) -> tuple[str, str | None]:
+        """Delete a file; its last content is kept in history. Returns (version, history stamp)."""
+        old = self.read(name)
+        if old is None:
+            return current_version(force=True), None
+        hist = self.root / HISTORY_DIR / name
+        hist.mkdir(parents=True, exist_ok=True)
+        saved = _stamp()
+        (hist / f"{saved}.md").write_text(old, encoding="utf-8")
+        (self.root / name).unlink()
         return self._bump(name, by), saved
 
     def append_audit(self, record: dict) -> None:
@@ -129,6 +164,11 @@ class GCSStore:
                 names.append(name)
         return sorted(names)
 
+    def internal_names(self) -> list[str]:
+        start = f"{self.prefix}{INTERNAL_DIR}/"
+        return sorted(n for b in self.bucket.list_blobs(prefix=start)
+                      if is_internal_name(n := b.name[len(self.prefix):]))
+
     def read(self, name: str) -> str | None:
         b = self._blob(name)
         return b.download_as_text(encoding="utf-8") if b.exists() else None
@@ -143,6 +183,18 @@ class GCSStore:
             saved = _stamp()
             self._blob(f"{HISTORY_DIR}/{name}/{saved}.md").upload_from_string(old, content_type="text/markdown")
         self._blob(name).upload_from_string(text, content_type="text/markdown")
+        version = _stamp()
+        self._blob(VERSION_FILE).upload_from_string(
+            json.dumps({"version": version, "file": name, "by": by}), content_type="application/json")
+        return version, saved
+
+    def remove(self, name: str, by: str) -> tuple[str, str | None]:
+        old = self.read(name)
+        if old is None:
+            return self.version(), None
+        saved = _stamp()
+        self._blob(f"{HISTORY_DIR}/{name}/{saved}.md").upload_from_string(old, content_type="text/markdown")
+        self._blob(name).delete()
         version = _stamp()
         self._blob(VERSION_FILE).upload_from_string(
             json.dumps({"version": version, "file": name, "by": by}), content_type="application/json")

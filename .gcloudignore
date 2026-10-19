@@ -7,8 +7,12 @@
 .gcloudignore
 docs/
 scripts/
-chat_export/
+chat_export/*
+!chat_export/export_gchat.py
+!chat_export/clean_chat.py
+!chat_export/extraction_prompt.md
 cli.py
 deploy/
 *.md
 !knowledge/README.md
+!chat_export/extraction_prompt.md

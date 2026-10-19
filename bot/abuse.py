@@ -1,10 +1,11 @@
 """Rate limits, spam detection and temporary blocks.
 
 Who a user is:
+    user the signed-in Google account (when USER_LOGIN=google)
     ip   the client IP (behind Cloud Run / a load balancer, set TRUSTED_PROXY_HOPS)
     cid  a random ID the chat page keeps in the browser (sent as X-Client-Id)
-Strikes count per browser (cid), and per IP with a higher threshold so clearing the
-browser ID doesn't escape it. A block covers both the browser ID and the IP.
+Strikes count per account (or browser, without sign-in), and per IP with a higher threshold so
+clearing the browser ID doesn't escape it. A block covers the account, browser ID and IP.
 
 What gives a strike:
     gibberish      symbols-only, "aaaaaaaa", one word repeated (caught here, no AI call)
@@ -86,8 +87,8 @@ class Guard:
 
     # ---------------------------------------------------------------- identity
     @staticmethod
-    def subjects(ip: str, cid: str | None) -> list[str]:
-        subs = []
+    def subjects(ip: str, cid: str | None, user: str | None = None) -> list[str]:
+        subs = [f"user:{user.lower()}"] if user else []
         if cid and CID_RE.match(cid):
             subs.append(f"cid:{cid}")
         if ip:
@@ -101,7 +102,7 @@ class Guard:
             b = self.blocks.get(s)
             if b and b["until"] <= now:
                 del self.blocks[s]
-            elif b and (s.startswith("cid:") or config.BLOCK_BY_IP):
+            elif b and (s.startswith(("cid:", "user:")) or config.BLOCK_BY_IP):
                 raise Limited(429, "Access to the assistant is paused because of repeated unrelated or "
                                    f"spam messages. You can try again {_until_text(b['until'])}. "
                                    f"If this is a mistake, contact {config.SUPPORT_CONTACT}.",
@@ -176,7 +177,8 @@ class Guard:
                 q.popleft()
             counts[s] = len(q)
         self._event("strike", subjects, reason)
-        # The first subject is the browser ID (or the IP for clients without one, e.g. scripts).
+        # The first subject is the account, else the browser ID (or the IP for clients without
+        # one, e.g. scripts).
         primary = counts[subjects[0]]
         over = primary >= config.STRIKES_TO_BLOCK
         ip_over = any(s.startswith("ip:") and n >= config.STRIKES_TO_BLOCK * IP_STRIKE_FACTOR

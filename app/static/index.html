@@ -82,6 +82,27 @@
   .topic svg.i { color: var(--muted); }
   .topic:hover svg.i { color: var(--accent); }
 
+  .chats { display: flex; flex-direction: column; gap: 1px; max-height: 38vh; overflow-y: auto; }
+  .chat-item { display: flex; align-items: center; border-radius: 9px; }
+  .chat-item:hover, .chat-item.on { background: var(--accent-soft); }
+  .chat-item button.open {
+    flex: 1; min-width: 0; text-align: left; background: none; border: none; padding: 7px 10px;
+    font-size: 13.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .chat-item.on button.open { color: var(--accent); font-weight: 600; }
+  .chat-item button.del { background: none; border: none; color: var(--muted); padding: 4px 8px; visibility: hidden; font-size: 15px; }
+  .chat-item:hover button.del { visibility: visible; }
+  .chat-item button.del:hover { color: var(--danger); }
+  .chats-empty { font-size: 13px; color: var(--muted); padding: 0 10px; }
+  .user-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); max-width: 260px; }
+  .user-chip .em { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .role { font-size: 11px; font-weight: 600; border-radius: 999px; padding: 1px 8px; flex: none; }
+  .role-internal { background: var(--accent-soft); color: var(--accent); }
+  .role-partner { background: var(--teal-soft); color: var(--teal); }
+  .team-sel { border: 1px solid var(--border); border-radius: 9px; padding: 6px 8px; font: inherit; font-size: 13px;
+              color: var(--ink-2); background: var(--surface); max-width: 160px; }
+  .chat-item .tm { font-size: 10.5px; font-weight: 600; color: var(--accent); background: var(--accent-soft); border-radius: 6px; padding: 1px 6px; margin-right: 6px; }
+  #googleBtn { display: flex; justify-content: center; min-height: 44px; margin-bottom: 8px; }
   .mem-card {
     margin-top: auto; background: var(--accent-soft); border: 1px solid #d7defe; border-radius: 12px;
     padding: 12px 14px; font-size: 13px; color: #1e3a8a;
@@ -259,25 +280,42 @@
   .send.stop svg.i { fill: currentColor; stroke: none; }
   .disclaimer { max-width: 860px; margin: 8px auto 0; text-align: center; font-size: 12px; color: var(--muted); }
 
-  /* ---------- login ---------- */
-  .login {
-    position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center; padding: 16px;
+  /* ---------- start page: sign in, then choose a team ---------- */
+  body.gated .app { display: none; }
+  .gate {
+    position: fixed; inset: 0; z-index: 30; display: none; overflow-y: auto; padding: 24px 16px;
     background: radial-gradient(1200px 600px at 50% -10%, #e0e7ff 0%, var(--bg) 55%);
   }
-  .login.show { display: flex; }
-  .login form {
-    width: 100%; max-width: 380px; background: var(--surface); border: 1px solid var(--border);
-    border-radius: 18px; padding: 32px 28px; box-shadow: var(--shadow-md); text-align: center;
+  .gate.show { display: flex; }
+  .gate-card {
+    margin: auto; width: 100%; max-width: 440px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 20px; padding: 36px 32px; box-shadow: var(--shadow-md); text-align: center;
   }
-  .login h2 { margin: 14px 0 6px; font-size: 20px; letter-spacing: -.01em; }
-  .login p { margin: 0 0 20px; color: var(--muted); font-size: 14px; }
-  .login input {
+  .gate-card.wide { max-width: 640px; }
+  .gate h2 { margin: 14px 0 6px; font-size: 22px; letter-spacing: -.01em; }
+  .gate p.lead { margin: 0 0 22px; color: var(--muted); font-size: 14.5px; }
+  .gate input {
     width: 100%; padding: 11px 14px; border-radius: 10px; border: 1px solid var(--border-strong);
     font: inherit; color: var(--ink); background: var(--surface-2); margin-bottom: 10px;
   }
-  .login input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px rgba(47, 91, 234, .12); }
-  .login .btn-primary { width: 100%; padding: 11px; }
-  .login .msg-err { min-height: 20px; font-size: 13px; color: var(--danger); margin-bottom: 8px; }
+  .gate input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px rgba(47, 91, 234, .12); }
+  .gate .btn-primary { width: 100%; padding: 11px; }
+  .gate .msg-err { min-height: 20px; font-size: 13px; color: var(--danger); margin-top: 8px; }
+  .gate .fine { font-size: 12px; color: var(--muted); margin: 18px 0 0; }
+  .gate .steps { display: flex; justify-content: center; gap: 8px; margin: 0 0 18px; font-size: 12px; color: var(--muted); }
+  .gate .steps span { padding: 2px 10px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); }
+  .gate .steps span.on { background: var(--accent-soft); border-color: #c7d2fe; color: var(--accent); font-weight: 600; }
+  .team-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; text-align: left; }
+  .team-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px;
+    box-shadow: var(--shadow-sm); transition: border-color .15s, box-shadow .15s, transform .15s; text-align: left;
+  }
+  .team-card:hover { border-color: #c7d2fe; box-shadow: var(--shadow-md); transform: translateY(-1px); }
+  .team-card strong { display: block; font-size: 15px; color: var(--ink); }
+  .team-card span { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .link-btn { background: none; border: none; color: var(--accent); font-size: 13px; padding: 4px; }
+  .link-btn:hover { text-decoration: underline; }
+  .gate-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
 
   /* ---------- toast ---------- */
   .toast {
@@ -305,6 +343,7 @@
     .composer-wrap { padding: 8px 16px 12px; }
   }
   @media (max-width: 600px) {
+    .user-chip .em { display: none; }
     .cards { grid-template-columns: 1fr; }
     .welcome h2 { font-size: 22px; }
     .msg.bot .avatar { display: none; }
@@ -313,7 +352,7 @@
   }
 </style>
 </head>
-<body>
+<body class="gated">
 
 <!-- Bot mark: a sample droplet holding API braces. Defined once, reused everywhere. -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -345,6 +384,11 @@
       <svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> New chat
     </button>
 
+    <nav id="chatsNav" hidden>
+      <div class="side-label">Your chats</div>
+      <div class="chats" id="chats"></div>
+    </nav>
+
     <nav>
       <div class="side-label">Browse topics</div>
       <div class="topics" id="topics"></div>
@@ -356,7 +400,7 @@
         What I remember
       </strong>
       <p class="mem-text" id="memText"></p>
-      <div class="mem-foot"><span>Saved only in this browser</span><button type="button" id="memForget">Forget</button></div>
+      <div class="mem-foot"><span>Saved in your account</span><button type="button" id="memForget">Forget</button></div>
     </div>
 
     <div class="tip-card">
@@ -377,7 +421,9 @@
       </button>
       <svg class="logo sm mobile-brand" aria-hidden="true"><use href="#botmark"/></svg>
       <div class="title"><h1 id="convTitle">New conversation</h1></div>
-      <span class="chip"><span class="dot"></span> Answers from official API docs</span>
+      <span class="chip"><span class="dot"></span> <span id="chipText">Answers from official API docs</span></span>
+      <select class="team-sel" id="teamSel" hidden aria-label="Team" title="Which team's knowledge to use"></select>
+      <span class="user-chip" id="userChip" hidden><span class="em" id="userEmail"></span><span class="role" id="userRole"></span></span>
       <button class="icon-btn" id="newChatTop" type="button" title="New chat">
         <svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span class="lbl">New</span>
       </button>
@@ -410,19 +456,37 @@
   </div>
 </div>
 
-<div class="login" id="login">
-  <form id="loginForm">
+<div class="gate show" id="gate">
+  <div class="gate-card" id="gateCard">
     <svg class="logo lg" aria-hidden="true"><use href="#botmark"/></svg>
     <h2 data-bot-name>Integration Assistant</h2>
-    <p>Enter the access code shared by the integration team to continue.</p>
-    <input id="code" type="password" placeholder="Access code" autocomplete="off" required aria-label="Access code">
-    <div class="msg-err" id="loginError" role="alert"></div>
-    <button class="btn-primary" type="submit">Continue</button>
-  </form>
+
+    <section id="stepSignin">
+      <p class="lead" id="loginText">Answers on the Thyrocare partner APIs, and for our own teams, on their repos and team chats.</p>
+      <div id="googleBtn" hidden></div>
+      <form id="loginForm" hidden>
+        <input id="code" type="password" placeholder="Access code" autocomplete="off" aria-label="Access code">
+        <button class="btn-primary" type="submit">Continue</button>
+      </form>
+      <div class="msg-err" id="loginError" role="alert"></div>
+      <p class="fine" id="signinFine">Your chats are saved to your account. Never share real tokens, passwords or patient data.</p>
+    </section>
+
+    <section id="stepTeam" hidden>
+      <div class="steps"><span>1 · Signed in</span><span class="on">2 · Choose your team</span></div>
+      <p class="lead"><span id="hello"></span> Which team are you asking about? Answers come from that team's repos, chats and notes.</p>
+      <div class="team-grid" id="teamGrid"></div>
+      <div class="gate-foot">
+        <button type="button" class="link-btn" id="allTeams">Not sure? Ask across all teams</button>
+        <button type="button" class="link-btn" id="otherAccount">Use another account</button>
+      </div>
+    </section>
+  </div>
 </div>
 
 <div class="toast" id="toast" role="status"></div>
 
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -477,32 +541,29 @@ if (!clientId) {
   clientId = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
   store.set("ia.cid", clientId);
 }
-let history = [];          // [{role, content}]
+let history = [];          // [{role, content}] of the open conversation (also saved on the server)
 let controller = null;     // AbortController while streaming
+let me = null;             // {email, name, role, memory}
+const newId = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
+let conversationId = newId();
+// Internal users: the team whose knowledge answers use ("" = all teams). Remembered in this browser.
+let team = store.get("ia.team") || "";
+const teamName = (slug) => (me?.teams || []).find((t) => t.slug === slug)?.name || "All teams";
 
-/* ---------- session memory (summary kept only in this browser) ---------- */
-const MEM_KEY = "ia.memory.v1";
+/* ---------- session memory (a short summary saved in the user's account) ---------- */
+let memory = "";
 let summarizedUpTo = 0;    // history index already folded into the memory
 let summarizing = false;
 let idleTimer = null;
 
-function loadMemory() {
-  try {
-    const m = JSON.parse(store.get(MEM_KEY) || "null");
-    if (!m?.summary) return null;
-    if (Date.now() - m.updatedAt > (cfg.summaryTtlDays || 30) * 86400000) { store.del(MEM_KEY); return null; }
-    return m;
-  } catch { return null; }
-}
-function saveMemory(summary) {
-  store.set(MEM_KEY, JSON.stringify({ summary, updatedAt: Date.now() }));
-  showMemory();
-}
-function forgetMemory() { store.del(MEM_KEY); summarizedUpTo = history.length; showMemory(); }
 function showMemory() {
-  const m = loadMemory();
-  $("memCard").hidden = !m;
-  $("memText").textContent = m?.summary || "";
+  $("memCard").hidden = !memory;
+  $("memText").textContent = memory;
+}
+async function forgetMemory() {
+  const res = await fetch("/api/memory", { method: "DELETE", headers: headers() }).catch(() => null);
+  if (res?.ok) { memory = ""; summarizedUpTo = history.length; showMemory(); toast("Forgotten"); }
+  else toast("Couldn't forget right now");
 }
 
 // Fold the messages not yet summarised into the memory. Called after a quiet period,
@@ -510,16 +571,14 @@ function showMemory() {
 async function summarizeNow() {
   clearTimeout(idleTimer);
   if (summarizing || controller) return;
-  const upTo = history.length;
-  const fresh = history.slice(summarizedUpTo, upTo);
-  if (fresh.length < 2) return;
+  if (history.length - summarizedUpTo < 2) return;
   summarizing = true;
   try {
-    const res = await api("/api/summarize", { messages: fresh, previous: loadMemory()?.summary || "" });
+    const res = await api("/api/summarize", { conversation_id: conversationId, since: summarizedUpTo });
     if (res.ok) {
-      const { summary } = await res.json();
-      if (summary) saveMemory(summary);
-      summarizedUpTo = Math.max(summarizedUpTo, upTo);
+      const data = await res.json();
+      if (data.summary) { memory = data.summary; showMemory(); }
+      summarizedUpTo = Math.max(summarizedUpTo, data.upTo || 0);
     }
   } catch {} finally { summarizing = false; }
 }
@@ -554,12 +613,58 @@ function scrollDown(force) {
 $("scroller").addEventListener("scroll", () => $("jump").classList.toggle("show", !nearBottom()));
 $("jump").onclick = () => scrollDown(true);
 
+function headers() {
+  return { "Content-Type": "application/json", "X-Access-Code": accessCode, "X-Client-Id": clientId };
+}
 function api(path, body) {
-  return fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Access-Code": accessCode, "X-Client-Id": clientId },
-    body: JSON.stringify(body ?? {}),
-  });
+  return fetch(path, { method: "POST", headers: headers(), body: JSON.stringify(body ?? {}) });
+}
+const getJSON = (path) => fetch(path, { headers: headers() }).then((r) => (r.ok ? r.json() : Promise.reject(r)));
+
+/* ---------- saved conversations ---------- */
+async function loadChats() {
+  const data = await getJSON("/api/conversations").catch(() => null);
+  if (!data) return;
+  const list = $("chats");
+  list.innerHTML = "";
+  $("chatsNav").hidden = false;
+  if (!data.conversations.length) { list.innerHTML = '<div class="chats-empty">No saved chats yet.</div>'; return; }
+  for (const c of data.conversations) {
+    const row = document.createElement("div");
+    row.className = "chat-item" + (c.id === conversationId ? " on" : "");
+    row.innerHTML = '<button type="button" class="open"></button><button type="button" class="del" title="Delete chat" aria-label="Delete chat">×</button>';
+    row.firstChild.textContent = c.title;
+    if (c.team && me?.teams?.length) row.firstChild.insertAdjacentHTML("afterbegin", `<span class="tm">${DOMPurify.sanitize(teamName(c.team))}</span>`);
+    row.firstChild.title = `${c.title}\n${new Date(c.updated).toLocaleString()}`;
+    row.firstChild.onclick = () => openChat(c.id);
+    row.lastChild.onclick = async () => {
+      if (!confirm("Delete this chat? This can't be undone.")) return;
+      await fetch(`/api/conversations/${encodeURIComponent(c.id)}`, { method: "DELETE", headers: headers() }).catch(() => {});
+      if (c.id === conversationId) newChat(); else loadChats();
+    };
+    list.appendChild(row);
+  }
+}
+async function openChat(id) {
+  if (controller) return;
+  summarizeNow();
+  const conv = await getJSON(`/api/conversations/${encodeURIComponent(id)}`).catch(() => null);
+  if (!conv) { toast("Couldn't open that chat"); return; }
+  conversationId = id;
+  if (me?.teams?.length) { team = conv.team || ""; showTeam(); }
+  history = conv.messages.map((m) => ({ role: m.role, content: m.content }));
+  summarizedUpTo = history.length;   // already summarised when it was last open
+  $("convTitle").textContent = conv.title;
+  $("thread").innerHTML = "";
+  for (const m of conv.messages) {
+    if (m.role === "user") { addUser(m.content); continue; }
+    const row = addBot();
+    renderMarkdown(row.querySelector(".answer"), m.content);
+    addActions(row, m.id, m.content, !!m.stopped);
+  }
+  scrollDown(true);
+  closeMenu();
+  loadChats();
 }
 
 /* ---------- rendering ---------- */
@@ -593,7 +698,9 @@ function showWelcome() {
     <section class="welcome" id="welcome">
       <svg class="logo lg" aria-hidden="true"><use href="#botmark"/></svg>
       <h2>Hi, I'm ${DOMPurify.sanitize(cfg.botName)}</h2>
-      <p>Ask me anything about the partner APIs: authentication, catalog, slots, orders, leads, reports and webhooks. Paste a request or an error and I'll tell you exactly what to fix.</p>
+      <p>${me?.role === "internal"
+        ? "Ask about the partner APIs, or about our repos and team chats: endpoints, flows, config, errors. Paste a request, an error or a stack trace and I'll point you to the cause."
+        : "Ask me anything about the partner APIs: authentication, catalog, slots, orders, leads, reports and webhooks. Paste a request or an error and I'll tell you exactly what to fix."}</p>
       <div class="cards">${SUGGESTIONS.map(([ic, k, q]) => `
         <button class="card" type="button" data-q="${q.replace(/"/g, "&quot;")}">
           <span class="k">${icon(ic)} ${k}</span><div class="q">${q}</div>
@@ -662,7 +769,7 @@ function addActions(row, messageId, answer, stopped) {
 }
 
 function sendFeedback(message_id, rating, comment) {
-  api("/api/feedback", { message_id, rating, comment })
+  api("/api/feedback", { message_id, rating, comment, conversation_id: conversationId })
     .then((r) => toast(r.ok ? "Thanks for the feedback" : "Couldn't send feedback"))
     .catch(() => toast("Couldn't send feedback"));
 }
@@ -699,13 +806,13 @@ async function ask(question) {
   try {
     const res = await fetch("/api/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Access-Code": accessCode, "X-Client-Id": clientId },
-      body: JSON.stringify({ messages: history, summary: loadMemory()?.summary || "" }),
+      headers: headers(),
+      body: JSON.stringify({ messages: [{ role: "user", content: question }], conversation_id: conversationId, team: team || null }),
       signal: controller.signal,
     });
     if (res.status === 401) {
       history.pop(); row.remove(); $("thread").lastElementChild?.remove();
-      showLogin("Your access code is no longer valid."); return;
+      showLogin(cfg.login === "google" ? "Your sign-in has expired. Please sign in again." : "Your access code is no longer valid."); return;
     }
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -746,6 +853,7 @@ async function ask(question) {
   history.push({ role: "assistant", content: answer });
   scheduleSummary();
   addActions(row, messageId, answer, stopped);
+  if (history.length <= 2) loadChats();   // a new chat now shows in the list
 }
 
 function newChat() {
@@ -753,6 +861,8 @@ function newChat() {
   summarizeNow();            // keep what was learned from this conversation
   history = [];
   summarizedUpTo = 0;
+  conversationId = newId();
+  loadChats();
   $("convTitle").textContent = "New conversation";
   showWelcome();
   closeMenu();
@@ -795,11 +905,108 @@ $("menuBtn").onclick = openMenu;
 $("scrim").onclick = closeMenu;
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
 
-/* ---------- login ---------- */
+/* ---------- team (internal users) ---------- */
+function showTeam() {
+  const sel = $("teamSel");
+  const list = me?.teams || [];
+  sel.hidden = !list.length;
+  if (!list.length) return;
+  if (team && !list.some((t) => t.slug === team)) team = "";       // team was removed
+  sel.innerHTML = [{ slug: "", name: "All teams" }, ...list]
+    .map((t) => `<option value="${t.slug}">${DOMPurify.sanitize(t.name)}</option>`).join("");
+  sel.value = team;
+  $("chipText").textContent = team ? `${teamName(team)} docs + partner docs` : "Partner docs + all teams' repos & chats";
+}
+// A conversation stays in the team it started in, so switching team starts a new chat.
+function chooseTeam(slug) {
+  if (slug === team) return;
+  const busy = history.length > 0;
+  team = slug; store.set("ia.team", slug);
+  if (busy) { newChat(); toast(`New chat for ${teamName(slug)}`); }
+  showTeam();
+}
+$("teamSel").onchange = (e) => chooseTeam(e.target.value);
+
+/* ---------- start page: sign in, then choose a team ---------- */
+function showGate(step) {
+  document.body.classList.add("gated");
+  $("gate").classList.add("show");
+  $("stepSignin").hidden = step !== "signin";
+  $("stepTeam").hidden = step !== "team";
+  $("gateCard").classList.toggle("wide", step === "team");
+}
 function showLogin(msg) {
+  showGate("signin");
   $("loginError").textContent = msg || "";
-  $("login").classList.add("show");
-  $("code").focus();
+  if (cfg.login === "code") $("code").focus();
+}
+function showTeamStep() {
+  showGate("team");
+  const first = (me.name || me.email || "").split(/[ @]/)[0];
+  $("hello").textContent = first ? `Hi ${first}!` : "";
+  $("teamGrid").innerHTML = "";
+  for (const t of me.teams) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "team-card";
+    b.innerHTML = "<strong></strong><span></span>";
+    b.querySelector("strong").textContent = t.name;
+    b.querySelector("span").textContent = t.description || `${t.name} team knowledge`;
+    b.onclick = () => enterApp(t.slug);
+    $("teamGrid").appendChild(b);
+  }
+}
+$("allTeams").onclick = () => enterApp("");
+$("otherAccount").onclick = () => $("logout").click();
+
+// After sign-in: who the user is; internal users then pick a team (remembered in this browser).
+async function signedIn() {
+  me = await getJSON("/api/me").catch(() => null);
+  if (!me) { showLogin(); return false; }
+  const chosen = store.get("ia.team");
+  if (me.teams.length && (chosen === null || (chosen && !me.teams.some((t) => t.slug === chosen)))) {
+    showTeamStep();
+    return true;
+  }
+  enterApp(me.teams.length ? chosen : "");
+  return true;
+}
+// Open the chat for the signed-in user (and chosen team).
+function enterApp(slug) {
+  team = slug || ""; if (me.teams.length) store.set("ia.team", team);
+  $("gate").classList.remove("show");
+  document.body.classList.remove("gated");
+  memory = me.memory || ""; showMemory();
+  const internal = me.role === "internal";
+  $("chipText").textContent = internal ? "Partner docs + internal repos & chats" : "Answers from official API docs";
+  $("userChip").hidden = cfg.login === "none";
+  $("userEmail").textContent = me.email || me.name;
+  $("userRole").textContent = internal ? "Internal" : "Partner";
+  $("userRole").className = "role role-" + me.role;
+  $("logout").style.display = cfg.login === "none" ? "none" : "";
+  history = []; conversationId = newId(); summarizedUpTo = 0;
+  $("convTitle").textContent = "New conversation";
+  showWelcome();
+  showTeam();
+  loadChats();
+  input.focus();
+}
+function setupGoogle() {
+  $("googleBtn").hidden = false;
+  const ready = () => {
+    google.accounts.id.initialize({
+      client_id: cfg.googleClientId, auto_select: true,
+      callback: async (resp) => {
+        $("loginError").textContent = "";
+        const res = await api("/api/user/google-login", { credential: resp.credential }).catch(() => null);
+        if (res?.ok) { await signedIn(); return; }
+        const err = res ? await res.json().catch(() => ({})) : {};
+        $("loginError").textContent = err.detail || "Can't reach the server. Please try again.";
+      },
+    });
+    google.accounts.id.renderButton($("googleBtn"), { theme: "outline", size: "large", text: "signin_with", width: 300 });
+  };
+  if (window.google?.accounts?.id) ready();
+  else { const t = setInterval(() => { if (window.google?.accounts?.id) { clearInterval(t); ready(); } }, 100); }
 }
 $("loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -807,18 +1014,24 @@ $("loginForm").addEventListener("submit", async (e) => {
   const res = await api("/api/login").catch(() => null);
   if (res?.ok) {
     store.set("accessCode", accessCode);
-    $("login").classList.remove("show");
-    $("logout").style.display = "";
-    input.focus();
+    await signedIn();
   } else {
     $("loginError").textContent = res ? "That access code isn't valid." : "Can't reach the server. Please try again.";
   }
 });
-$("logout").onclick = () => {
-  store.del("accessCode"); store.del(MEM_KEY); accessCode = "";
-  history = []; newChat(); showMemory(); showLogin(); $("logout").style.display = "none";
+$("logout").onclick = async () => {
+  summarizeNow();
+  if (cfg.login === "google") {
+    await api("/api/user/logout").catch(() => {});
+    window.google?.accounts?.id?.disableAutoSelect();
+  }
+  store.del("accessCode"); store.del("ia.team"); accessCode = ""; memory = ""; me = null;
+  history = []; conversationId = newId(); showWelcome(); showMemory();
+  $("chats").innerHTML = ""; $("chatsNav").hidden = true; $("userChip").hidden = true; $("teamSel").hidden = true;
+  $("logout").style.display = "none";
+  showLogin();
 };
-$("memForget").onclick = () => { forgetMemory(); toast("Forgotten"); };
+$("memForget").onclick = () => forgetMemory();
 document.addEventListener("visibilitychange", () => { if (document.hidden) summarizeNow(); });
 
 /* ---------- boot ---------- */
@@ -827,15 +1040,14 @@ document.addEventListener("visibilitychange", () => { if (document.hidden) summa
   cfg = { ...cfg, ...c };
   document.title = cfg.botName;
   document.querySelectorAll("[data-bot-name]").forEach((el) => (el.textContent = cfg.botName));
-  showWelcome();
-  showMemory();
   updateComposer();
-  if (cfg.requiresCode) {
-    const ok = accessCode && (await api("/api/login").catch(() => null))?.ok;
-    if (ok) $("logout").style.display = ""; else showLogin();
-  } else {
-    input.focus();
+  if (cfg.login === "google") setupGoogle();
+  if (cfg.login === "code") {
+    $("loginForm").hidden = false;
+    $("loginText").textContent = "Enter the access code shared by the integration team to continue.";
+    if (!accessCode) { showLogin(); return; }
   }
+  await signedIn();       // an existing session goes straight on; otherwise the sign-in step
 })();
 </script>
 </body>

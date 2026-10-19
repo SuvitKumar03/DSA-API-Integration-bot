@@ -21,6 +21,9 @@ KNOWLEDGE_REFRESH_SECONDS = int(os.getenv("KNOWLEDGE_REFRESH_SECONDS", "60"))
 # "anthropic" = Claude API. "openai_compatible" = any OpenAI-compatible endpoint
 # (Gemini, Groq, OpenRouter, Mistral, a local Ollama server, ...).
 PROVIDER = os.getenv("PROVIDER", "anthropic").strip().lower()
+# Claude API key (console.anthropic.com > API keys). Used when PROVIDER=anthropic: put the key in
+# .env as ANTHROPIC_API_KEY=... and set PROVIDER=anthropic.
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_MODEL = os.getenv("LLM_MODEL", "")
@@ -52,7 +55,8 @@ for _pair in os.getenv("ACCESS_CODES", "").split(","):
         _partner, _code = _pair.split(":", 1)
         ACCESS_CODES[_code.strip()] = _partner.strip()
 
-# Admins sign in to /admin with Google. Only these emails are admins (comma separated).
+# Super admins sign in to /admin with Google (comma separated). Team admins are added by a super
+# admin on the admin page (Teams).
 ADMIN_EMAILS = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
 # OAuth "Web application" client ID from Google Cloud console (Credentials).
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
@@ -90,9 +94,88 @@ MAX_MESSAGE_CHARS = int(os.getenv("MAX_MESSAGE_CHARS", "8000"))
 # Internal names the bot must never reveal (see bot/guardrails.py for the syntax).
 INTERNAL_TERMS_FILE = Path(os.getenv("INTERNAL_TERMS_FILE", ROOT_DIR / "internal_terms.txt"))
 
-# Session memory: a short summary of the partner's past conversations, kept only in the
-# partner's browser and sent along with each question.
+# Session memory: a short summary of each user's past conversations, saved in their account
+# (DATA_DIR / DATA_BUCKET) and added to every question.
 SUMMARY_IDLE_MINUTES = int(os.getenv("SUMMARY_IDLE_MINUTES", "10"))
 SUMMARY_EVERY_MESSAGES = int(os.getenv("SUMMARY_EVERY_MESSAGES", "12"))
 SUMMARY_MAX_CHARS = int(os.getenv("SUMMARY_MAX_CHARS", "1200"))
 SUMMARY_TTL_DAYS = int(os.getenv("SUMMARY_TTL_DAYS", "30"))
+
+# ---------------------------------------------------------------- users
+# "google" = everyone signs in with Google (GOOGLE_CLIENT_ID); each user has their own chat
+# history and memory. "none" = no sign-in (local development; one shared local user).
+USER_LOGIN = os.getenv("USER_LOGIN", "google" if GOOGLE_CLIENT_ID else "none").strip().lower()
+# Signed-in users with a verified Google Workspace account on these domains are internal:
+# they also get the internal knowledge (repo docs, Google Chat docs). Everyone else is a partner.
+INTERNAL_DOMAINS = {d.strip().lower().lstrip("@") for d in
+                    os.getenv("INTERNAL_DOMAINS", "pharmeasy.in,thyrocare.in").split(",") if d.strip()}
+USER_SESSION_DAYS = int(os.getenv("USER_SESSION_DAYS", "14"))
+# Teams created the first time the team list is read ("slug:Name" pairs, set in .env: team names
+# can be internal). After that, super admins manage teams and their admins on the admin page.
+DEFAULT_TEAMS = [tuple(p.strip().split(":", 1)) for p in os.getenv("DEFAULT_TEAMS", "").split(",") if ":" in p]
+# With USER_LOGIN=none, treat the local user as internal (only for requests from this machine).
+LOCAL_USER_INTERNAL = os.getenv("LOCAL_USER_INTERNAL", "false").lower() == "true"
+MAX_CONVERSATIONS = int(os.getenv("MAX_CONVERSATIONS", "200"))
+
+# App data (users, sources, jobs): same backend choice as the knowledge files.
+DATA_BACKEND = os.getenv("DATA_BACKEND", KNOWLEDGE_BACKEND).strip().lower()
+DATA_DIR = Path(os.getenv("DATA_DIR", ROOT_DIR / "data"))
+DATA_BUCKET = os.getenv("DATA_BUCKET", KNOWLEDGE_BUCKET)
+DATA_PREFIX = os.getenv("DATA_PREFIX", "data/")
+
+# ---------------------------------------------------------------- internal knowledge sources
+# Read-only GitHub token (fine-grained, "Contents: read" on the org's repos). Used by the admin
+# "Sources" page to build and refresh one .md per repo.
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
+# How repos are read: "token" (GitHub API with GITHUB_TOKEN; servers), "git" (this computer's own
+# git login, e.g. saved in the macOS Keychain; reads whatever you can read, no token needed),
+# "auto" = token if GITHUB_TOKEN is set, else git.
+GITHUB_AUTH = os.getenv("GITHUB_AUTH", "auto").strip().lower()
+GITHUB_API = os.getenv("GITHUB_API", "https://api.github.com")
+# Only repos of these GitHub orgs/users can be added (comma separated; empty = any).
+GITHUB_ORGS = {o.strip().lower() for o in os.getenv("GITHUB_ORGS", "pharmeasy").split(",") if o.strip()}
+# How much source code one repo doc is built from, and how much the AI reads per call.
+REPO_MAX_CHARS = int(os.getenv("REPO_MAX_CHARS", "900000"))
+REPO_BATCH_CHARS = int(os.getenv("REPO_BATCH_CHARS", "150000"))
+# Weekly updates read the diff; a bigger diff than this rebuilds the doc from scratch.
+DELTA_MAX_CHARS = int(os.getenv("DELTA_MAX_CHARS", "200000"))
+# Google Chat: the OAuth token of the admin who signed in once with
+# `python chat_export/export_gchat.py --list-spaces` (reads the spaces that person is in).
+GCHAT_TOKEN_FILE = Path(os.getenv("GCHAT_TOKEN_FILE", ROOT_DIR / "chat_export" / "token.json"))
+# Timeout for one document-writing AI call.
+DOC_AI_TIMEOUT_SECONDS = int(os.getenv("DOC_AI_TIMEOUT_SECONDS", "900"))
+# Internal knowledge added to an internal user's question (the most relevant parts only).
+INTERNAL_CONTEXT_CHARS = int(os.getenv("INTERNAL_CONTEXT_CHARS", "60000"))
+
+# Scheduled refreshes. Times are in SCHEDULE_TIMEZONE. On Cloud Run (which can scale to zero)
+# use Cloud Scheduler to call POST /api/cron/tick with the X-Cron-Secret header instead.
+SCHEDULER_ENABLED = os.getenv("SCHEDULER_ENABLED", "true").lower() == "true"
+SCHEDULE_TIMEZONE = os.getenv("SCHEDULE_TIMEZONE", "Asia/Kolkata")
+CRON_SECRET = os.getenv("CRON_SECRET", "")
+
+# ---------------------------------------------------------------- documentation gaps
+# Questions the docs couldn't answer are collected; once a day per team (default 15:00) the AI
+# researches them (docs, repo code, chats), drafts the missing sections and emails the team's
+# admins, who add or reject each draft on the admin page (Gaps).
+GAP_DEFAULT_TIME = os.getenv("GAP_DEFAULT_TIME", "15:00")
+GAP_MAX_DRAFTS = int(os.getenv("GAP_MAX_DRAFTS", "10"))       # drafts per team per run
+# Gmail account that sends the emails (token from `python scripts/connect_gmail.py`).
+GMAIL_TOKEN_FILE = Path(os.getenv("GMAIL_TOKEN_FILE", ROOT_DIR / "chat_export" / "gmail_token.json"))
+# Address of this app, for links in emails.
+PUBLIC_URL = os.getenv("PUBLIC_URL", "http://localhost:8000").rstrip("/")
+
+# ---------------------------------------------------------------- answer cache
+# The same first question (same audience, team and knowledge version) gets the saved answer
+# instead of a new AI call. Any knowledge change starts a fresh cache; a 👎 removes that answer.
+ANSWER_CACHE_ENABLED = os.getenv("ANSWER_CACHE_ENABLED", "true").lower() == "true"
+ANSWER_CACHE_DAYS = float(os.getenv("ANSWER_CACHE_DAYS", "7"))
+
+# ---------------------------------------------------------------- interaction insights
+# Every question, answer and feedback is saved as JSON (secrets scrubbed). On the insights
+# schedule (default Monday 10:00) the AI analyses everything since the last run, the report is
+# saved and emailed to super admins, and the raw records are deleted.
+ANALYTICS_ENABLED = os.getenv("ANALYTICS_ENABLED", "true").lower() == "true"
+ANALYTICS_DEFAULT_TIME = os.getenv("ANALYTICS_DEFAULT_TIME", "10:00")
+ANALYTICS_BATCH_CHARS = int(os.getenv("ANALYTICS_BATCH_CHARS", "150000"))
+# Keep a copy of the analysed raw records for this many runs (0 = delete right after the report).
+ANALYTICS_KEEP_EXPORTS = int(os.getenv("ANALYTICS_KEEP_EXPORTS", "0"))

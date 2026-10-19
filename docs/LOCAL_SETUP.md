@@ -153,6 +153,52 @@ Restart the server, open http://localhost:8000/admin and click **Sign in with Go
 ADMIN_CODES=<your name>:<a code you choose>
 ```
 
+## 8. Sign-in, saved chats and internal answers
+
+- If your `.env` has `GOOGLE_CLIENT_ID` (step 7), the chat page asks everyone to **sign in with
+  Google**, and your chats are saved to your account (left sidebar, "Your chats"). Signed in with
+  your company Google account (`@pharmeasy.in` / `@thyrocare.in`) you are **Internal** and the bot
+  also answers from the repo and Google Chat docs; any other account is a **Partner**.
+- No sign-in for quick local testing: add `USER_LOGIN=none` to `.env`. Add
+  `LOCAL_USER_INTERNAL=true` too if you want internal answers locally.
+- Your chats are saved in the `data/` folder of your copy (git-ignored).
+
+## 9. Knowledge sources: repos and Google Chat (admins)
+
+On `/admin`, click **Sources**:
+
+1. **GitHub, easiest:** if `git clone https://github.com/pharmeasy/<a private repo>.git` works in your
+   terminal, add `GITHUB_AUTH=git` to `.env`: the bot uses that same login, no token needed.
+   (Linking a whole org at once still needs a token.) **Or with a token:** create a fine-grained token on GitHub (Settings > Developer settings > Personal access
+   tokens > Fine-grained): Resource owner = the org, Repository access = the repos (or all),
+   Permissions = **Contents: Read-only**. If the org uses SSO, authorise the token for it. Put it in
+   `.env` as `GITHUB_TOKEN=...` and restart.
+2. **Google Chat:** run `python chat_export/export_gchat.py --list-spaces` once and sign in with an
+   account that is a member of the space (it saves `chat_export/token.json`).
+3. Paste links, one per line (a repo, `https://github.com/pharmeasy` for every repo, or a Chat
+   space link), pick the schedule (default: every Friday 17:00 IST) and click **Add**.
+
+Builds run in the background, one at a time, with the AI from step 4. A full repo build makes
+several AI calls (a few minutes per repo); a weekly update only reads the new commits.
+
+## 10. Teams
+
+`ADMIN_EMAILS` are **super admins**. On `/admin` > **Teams** they add each team's admins
+(the teams listed in `DEFAULT_TEAMS` in `.env`, or new ones). A team admin signs in to `/admin` with Google
+and only sees their team's sources and documents. When adding sources, pick the team they belong to.
+On the chat page, internal users choose the team they're asking about.
+
+## 11. Documentation gaps and daily emails
+
+When the bot can't answer from the docs, the question is saved as a gap for that team. Every day
+(default 15:00 IST) the AI drafts the missing sections and emails the team's admins. Admins review
+them on `/admin` > **Gaps** and click **Add** or **Reject**. To send the emails:
+
+1. In the Google Cloud project of `chat_export/credentials.json`: APIs & Services > Library >
+   **Gmail API** > Enable.
+2. Run `python scripts/connect_gmail.py --test <your email>` and sign in with the account that
+   should send the emails (send-only permission).
+
 ## Troubleshooting
 
 | Problem | Fix |
@@ -169,10 +215,14 @@ ADMIN_CODES=<your name>:<a code you choose>
 | Google sign-in: `Error 400: origin_mismatch` | Open `http://localhost:8000/admin` exactly (not `127.0.0.1`), or ask Suvit to add your origin to the OAuth client |
 | Google sign-in: "... is not an admin" | Your email isn't in `ADMIN_EMAILS` in your `.env` |
 | `/admin` says "Admin is not enabled" | Set `ADMIN_EMAILS` (with `GOOGLE_CLIENT_ID`) or `ADMIN_CODES`, then restart |
+| Chat page asks for Google sign-in and you don't want it | Add `USER_LOGIN=none` to `.env` and restart |
+| Signed in with a company account but shown as "Partner" | Only Google Workspace accounts on `INTERNAL_DOMAINS` count; a personal Google account using a work email is a partner |
+| Sources: "No GitHub token" / "token isn't authorised for SSO" | Step 9.1: set `GITHUB_TOKEN`; on GitHub, Configure SSO > Authorise for the org |
+| Sources: "Google Chat isn't connected" | Step 9.2 |
 
 ## Good to know
 
-- **What's private:** `.env`, `knowledge/*.md`, `internal_terms.txt`, `logs/`, `chat_export/output/` and the PDFs are git-ignored. Keep it that way: the repo is public.
+- **What's private:** `.env`, `knowledge/*.md`, `internal_terms.txt`, `logs/`, `data/`, `chat_export/output/` and the PDFs are git-ignored. Keep it that way: the repo is public.
 - **Where things are:** see the Architecture section of the [README](../README.md) for diagrams of every flow and which file does what.
 - **Logs:** your questions and answers go to `logs/chats.jsonl` on your machine only.
 - **Getting updates:** `git pull` for code. For new docs, either update them through `/admin` or get a fresh `private-files.zip`.

@@ -1,12 +1,13 @@
 """Calls the configured model with the docs + conversation and streams the answer back."""
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 
 import anthropic
 
 from bot import config
-from bot.prompt import context_block, docs_version, system_blocks
+from bot.prompt import docs_version, dynamic_blocks, static_blocks, system_blocks
 
 log = logging.getLogger(__name__)
 
@@ -23,14 +24,15 @@ CUT_SHORT_TEXT = "\n\n_(Answer was cut short. Ask me to continue.)_"
 
 # ---------------------------------------------------------------- Claude
 
-_client = anthropic.AsyncAnthropic() if config.PROVIDER == "anthropic" else None
+_client = anthropic.AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY or None) if config.PROVIDER == "anthropic" else None
 
 
-def _request_kwargs(messages: list[dict], summary: str | None = None) -> dict:
+def _request_kwargs(messages: list[dict], summary: str | None = None, audience: str = "partner",
+                    extra: str | None = None, team: str | None = None) -> dict:
     kwargs = dict(
         model=config.MODEL,
         max_tokens=config.MAX_TOKENS,
-        system=system_blocks(summary),
+        system=system_blocks(summary, audience, extra, team),
         messages=messages,
         output_config={"effort": config.EFFORT},
     )
@@ -39,9 +41,11 @@ def _request_kwargs(messages: list[dict], summary: str | None = None) -> dict:
     return kwargs
 
 
-async def _stream_claude(messages: list[dict], usage_out: dict | None, summary: str | None) -> AsyncIterator[str]:
+async def _stream_claude(messages: list[dict], usage_out: dict | None, summary: str | None,
+                         audience: str = "partner", extra: str | None = None,
+                         team: str | None = None) -> AsyncIterator[str]:
     try:
-        async with _client.beta.messages.stream(**_request_kwargs(messages, summary)) as stream:
+        async with _client.beta.messages.stream(**_request_kwargs(messages, summary, audience, extra, team)) as stream:
             async for text in stream.text_stream:
                 yield text
             final = await stream.get_final_message()
@@ -83,13 +87,14 @@ if config.PROVIDER == "openai_compatible":
     _oai_client = openai.AsyncOpenAI(base_url=config.LLM_BASE_URL or None, api_key=config.LLM_API_KEY or "none")
 
 
-async def _stream_openai_compatible(messages: list[dict], usage_out: dict | None,
-                                    summary: str | None) -> AsyncIterator[str]:
+async def _stream_openai_compatible(messages: list[dict], usage_out: dict | None, summary: str | None,
+                                    audience: str = "partner", extra: str | None = None,
+                                    team: str | None = None) -> AsyncIterator[str]:
     import openai
 
     # Same instructions + docs as Claude, as one system message (no explicit cache markers here;
     # providers that cache do it automatically on a repeated prefix).
-    system = "\n\n".join(block["text"] for block in system_blocks(summary))
+    system = "\n\n".join(block["text"] for block in system_blocks(summary, audience, extra, team))
     finish_reason, usage = None, None
     try:
         stream = await _oai_client.chat.completions.create(
@@ -132,7 +137,7 @@ async def _stream_openai_compatible(messages: list[dict], usage_out: dict | None
 # ---------------------------------------------------------------- local Claude Code CLI (personal testing only)
 
 _cc_workdir = None
-_cc_version = None
+_cc_version: dict[str, str | None] = {}
 
 INSTALL_HINT = ("Claude Code isn't installed on this computer (or isn't on PATH). Install it with "
                 "`curl -fsSL https://claude.ai/install.sh | bash` (or `npm install -g @anthropic-ai/claude-code`), "
@@ -179,25 +184,32 @@ def _cc_error(hint: str) -> str:
 _API_AUTH_VARS = {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"}
 
 
-def _claude_code_workdir():
-    """Empty temp dir holding the system prompt, so the CLI loads no project settings."""
-    global _cc_workdir, _cc_version
+def _claude_code_workdir(audience: str = "partner", team: str | None = None):
+    """Empty temp dir holding the system prompts (one file per audience and team), so the CLI
+    loads no project settings."""
+    global _cc_workdir
     if _cc_workdir is None:
         import tempfile
         from pathlib import Path
 
         _cc_workdir = Path(tempfile.mkdtemp(prefix="integration-bot-"))
-    blocks = system_blocks()           # reloads the docs if an admin updated them
-    if _cc_version != docs_version():
-        (_cc_workdir / "system.txt").write_text("\n\n".join(b["text"] for b in blocks), encoding="utf-8")
-        _cc_version = docs_version()
+    blocks = static_blocks(audience, team)   # reloads the docs if an admin updated them
+    text = "\n\n".join(b["text"] for b in blocks)
+    key = _cc_prompt_name(audience, team)
+    if _cc_version.get(key) != text:          # the team list or docs changed
+        (_cc_workdir / key).write_text(text, encoding="utf-8")
+        _cc_version[key] = text
     return _cc_workdir
 
 
-def _as_transcript(messages: list[dict], summary: str | None = None) -> str:
-    """`claude -p` takes one prompt, so earlier turns (and the partner context, which can't go in
+def _cc_prompt_name(audience: str, team: str | None) -> str:
+    return f"system-{audience}-{team or 'all'}.txt" if audience == "internal" else f"system-{audience}.txt"
+
+
+def _as_transcript(messages: list[dict], summary: str | None = None, extra: str | None = None) -> str:
+    """`claude -p` takes one prompt, so earlier turns (and the per-user context, which can't go in
     the shared system-prompt file) are passed in the prompt itself."""
-    context = context_block(summary)
+    context = "\n\n".join(b["text"] for b in dynamic_blocks(summary, extra))
     prefix = f"{context}\n\n" if context else ""
     if len(messages) == 1:
         return prefix + messages[0]["content"]
@@ -206,14 +218,15 @@ def _as_transcript(messages: list[dict], summary: str | None = None) -> str:
             f"Now answer the partner's latest message:\n\n{messages[-1]['content']}")
 
 
-async def _stream_claude_code(messages: list[dict], usage_out: dict | None,
-                              summary: str | None) -> AsyncIterator[str]:
+async def _stream_claude_code(messages: list[dict], usage_out: dict | None, summary: str | None,
+                              audience: str = "partner", extra: str | None = None,
+                              team: str | None = None) -> AsyncIterator[str]:
     import asyncio
     import json
 
     import os
 
-    workdir = _claude_code_workdir()
+    workdir = _claude_code_workdir(audience, team)
     # .env puts ANTHROPIC_API_KEY into this process; the CLI would bill that API account instead
     # of the user's claude.ai subscription login, so API-auth variables are not passed on.
     env = {k: v for k, v in os.environ.items() if k not in _API_AUTH_VARS}
@@ -226,7 +239,7 @@ async def _stream_claude_code(messages: list[dict], usage_out: dict | None,
         proc = await asyncio.create_subprocess_exec(
             binary, "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
             "--tools", "", "--strict-mcp-config", "--no-session-persistence",
-            "--system-prompt-file", str(workdir / "system.txt"), "--model", config.CLAUDE_CODE_MODEL,
+            "--system-prompt-file", str(workdir / _cc_prompt_name(audience, team)), "--model", config.CLAUDE_CODE_MODEL,
             cwd=workdir, env=env, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE, limit=16 * 1024 * 1024,
         )
@@ -235,7 +248,7 @@ async def _stream_claude_code(messages: list[dict], usage_out: dict | None,
         yield _cc_error(INSTALL_HINT)
         return
 
-    proc.stdin.write(_as_transcript(messages, summary).encode())
+    proc.stdin.write(_as_transcript(messages, summary, extra).encode())
     await proc.stdin.drain()
     proc.stdin.close()
 
@@ -288,38 +301,42 @@ _STREAMS = {
 }
 
 
-async def stream_answer(messages: list[dict], usage_out: dict | None = None,
-                        summary: str | None = None) -> AsyncIterator[str]:
+async def stream_answer(messages: list[dict], usage_out: dict | None = None, summary: str | None = None,
+                        audience: str = "partner", extra: str | None = None,
+                        team: str | None = None) -> AsyncIterator[str]:
     """Yield the answer text in chunks.
 
     `messages` is the full conversation (alternating user/assistant, ending with
-    the user's question). `summary` is the partner's browser-kept session memory, if any.
+    the user's question). `summary` is the user's saved session memory, if any.
+    `audience` is "partner" or "internal"; `extra` is the matched internal knowledge; `team` is
+    the internal user's chosen team (None = all teams).
     If `usage_out` is given, token usage is written into it.
     """
     stream = _STREAMS.get(config.PROVIDER, _stream_claude)
-    async for text in stream(messages, usage_out, summary):
+    async for text in stream(messages, usage_out, summary, audience, extra, team):
         yield text
 
 
-async def complete(system: str, prompt: str, max_tokens: int = 800) -> str | None:
-    """One short, non-streaming call (used to write session summaries). Returns None on failure."""
+async def complete(system: str, prompt: str, max_tokens: int = 800, timeout: float = 120) -> str | None:
+    """One non-streaming call (session summaries, and writing repo / chat docs). Returns None on
+    failure; the reason is in the server log."""
     try:
         if config.PROVIDER == "openai_compatible":
-            r = await _oai_client.chat.completions.create(
+            r = await asyncio.wait_for(_oai_client.chat.completions.create(
                 model=config.MODEL, max_tokens=max_tokens,
-                messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}])
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}]), timeout)
             return (r.choices[0].message.content or "").strip() or None
         if config.PROVIDER == "claude_code":
-            return await _complete_claude_code(system, prompt)
-        r = await _client.messages.create(model=config.MODEL, max_tokens=max_tokens, system=system,
-                                          messages=[{"role": "user", "content": prompt}])
+            return await _complete_claude_code(system, prompt, timeout)
+        r = await asyncio.wait_for(_client.messages.create(model=config.MODEL, max_tokens=max_tokens, system=system,
+                                                           messages=[{"role": "user", "content": prompt}]), timeout)
         return "".join(b.text for b in r.content if b.type == "text").strip() or None
-    except Exception:  # summaries are best-effort; never break the chat because of them
-        log.exception("Summary call failed")
+    except Exception:  # best-effort; never break the chat because of them
+        log.exception("AI call failed")
         return None
 
 
-async def _complete_claude_code(system: str, prompt: str) -> str | None:
+async def _complete_claude_code(system: str, prompt: str, timeout: float = 120) -> str | None:
     import asyncio
     import json
     import os
@@ -335,7 +352,7 @@ async def _complete_claude_code(system: str, prompt: str) -> str | None:
         cwd=_claude_code_workdir(), env=env, stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     try:
-        out, err = await asyncio.wait_for(proc.communicate(prompt.encode()), timeout=120)
+        out, err = await asyncio.wait_for(proc.communicate(prompt.encode()), timeout=timeout)
     except asyncio.TimeoutError:
         proc.kill()
         log.error("Claude Code CLI timed out")

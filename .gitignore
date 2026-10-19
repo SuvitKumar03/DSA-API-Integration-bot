@@ -225,6 +225,7 @@ logs/
 # Google Chat export: OAuth secrets and exported client conversations
 chat_export/credentials.json
 chat_export/token.json
+chat_export/gmail_token.json
 chat_export/output/
 
 # Internal names the bot must never reveal (the list itself is sensitive)
@@ -249,3 +250,9 @@ private-files*.zip
 
 # Cloud Run settings with real values
 deploy/env.yaml
+
+# Private AI-session context
+CLAUDE.local.md
+
+# App data: users' saved chats and memory, source registry, Google Chat caches
+data/

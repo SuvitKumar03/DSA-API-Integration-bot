@@ -180,5 +180,15 @@ sign in with a partner code and ask a question, and open `$URL/admin` and sign i
   before it reaches the app.
 - **Custom domain** (for example `assistant.thyrocare.com`): Cloud Run domain mapping or a load
   balancer; then add that origin to the OAuth client too.
+- **User sign-in and saved chats.** Set `USER_LOGIN=google` and `DATA_BACKEND=gcs` (users' chats
+  and memory go to the bucket under `data/`; the instance disk is wiped on restart).
+- **Knowledge sources (repos, Google Chat).** Jobs run inside the app, in the background. On Cloud
+  Run, deploy with `--no-cpu-throttling` (background work needs CPU after the response) and keep
+  one instance (`--min-instances 1 --max-instances 1`). Set `SCHEDULER_ENABLED=false`, store a
+  random `CRON_SECRET` in Secret Manager, and create a Cloud Scheduler job that calls
+  `POST https://<service>/api/cron/tick` every 15 minutes with header `X-Cron-Secret: <secret>`.
+  `GITHUB_TOKEN` goes in Secret Manager. Google Chat sources need the admin's OAuth token and
+  `private_names.json`; until those are moved to Secret Manager, run Chat sources locally.
+  The AI that writes the docs is the deployed `PROVIDER` (needs an org API key).
 - **Cold start.** With `--min-instances 0` the first request after idle takes a few seconds.
   Set `--min-instances 1` to avoid it (small always-on cost).

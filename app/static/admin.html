@@ -73,6 +73,45 @@
   td { border-bottom: 1px solid var(--border); padding: 6px 8px; vertical-align: top; }
   td.ev { font-weight: 600; white-space: nowrap; }
   td.ev.login_denied, td.ev.login_failed { color: var(--danger); }
+  .files .grp { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 10px 10px 4px; }
+  .sched { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; font-size: 13px; }
+  .sched select, .sched input[type=time], .sched input[type=number] { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font: inherit; background: var(--surface); }
+  .sched input[type=number] { width: 70px; }
+  .days { display: inline-flex; gap: 4px; }
+  .days label { border: 1px solid var(--border); border-radius: 7px; padding: 3px 8px; cursor: pointer; user-select: none; }
+  .days input { display: none; }
+  .days label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+  .st { font-weight: 600; white-space: nowrap; }
+  .st.ok { color: var(--teal); } .st.error { color: var(--danger); } .st.running, .st.queued { color: var(--accent); }
+  .st.no_changes, .st.new, .st.interrupted { color: var(--muted); }
+  .src-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+  .src-actions .btn { padding: 4px 9px; font-size: 12px; }
+  .conn { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; margin: 0 0 10px; }
+  .conn b.yes { color: var(--teal); } .conn b.no { color: var(--danger); }
+  .draft { border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin: 12px 0; background: var(--surface); }
+  .draft h3 { margin: 0 0 4px; font-size: 15px; }
+  .draft textarea { min-height: 180px; }
+  .draft details { margin: 6px 0; font-size: 13px; }
+  .draft ul { margin: 4px 0; padding-left: 18px; }
+  .conf { font-size: 11px; font-weight: 600; border-radius: 99px; padding: 1px 8px; }
+  .conf.high { background: var(--teal-soft); color: var(--teal); } .conf.medium { background: var(--warn-soft); color: var(--warn); }
+  .conf.low { background: var(--danger-soft); color: var(--danger); }
+  .bars { display: flex; gap: 3px; align-items: flex-end; height: 40px; margin: 6px 0 2px; }
+  .bars div { width: 18px; background: var(--accent); border-radius: 3px 3px 0 0; min-height: 2px; opacity: .8; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 10px 0; }
+  .stat { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; }
+  .stat b { display: block; font-size: 20px; } .stat span { font-size: 12px; color: var(--muted); }
+  pre.report { white-space: pre-wrap; font: 13px/1.6 var(--font); background: var(--surface-2); border: 1px solid var(--border);
+               border-radius: 10px; padding: 12px 14px; max-height: 520px; overflow: auto; }
+  .overview { max-width: 1100px; margin: 20px auto 0; padding: 0 16px; }
+  .periods { display: flex; gap: 6px; }
+  .periods button { border: 1px solid var(--border); background: var(--surface); border-radius: 99px; padding: 4px 12px; font: 500 12px var(--font); cursor: pointer; color: var(--ink-2); }
+  .periods button.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+  .stat.good b { color: var(--teal); } .stat.bad b { color: var(--danger); }
+  .daybars { display: flex; gap: 4px; align-items: flex-end; height: 56px; margin-top: 8px; }
+  .daybars .d { flex: 1; max-width: 26px; display: flex; flex-direction: column-reverse; height: 100%; }
+  .daybars .a { background: var(--teal); opacity: .75; } .daybars .g { background: var(--danger); opacity: .75; } .daybars .o { background: var(--border-strong, #cbd5e1); }
+  .job { background: var(--accent-soft); border-radius: 10px; padding: 8px 12px; font-size: 13px; margin: 0 0 10px; }
 </style>
 </head>
 <body>
@@ -90,10 +129,20 @@
 
 <div id="app" hidden>
   <header>
-    <h1>Knowledge admin</h1><span class="badge">ADMIN</span>
+    <h1>Knowledge admin</h1><span class="badge" id="roleBadge">ADMIN</span>
     <span class="who"><span id="me"></span> · Version <span id="ver">-</span> ·
-      <a href="#" id="showAudit">Audit trail</a> · <a href="#" id="showBlocks">Blocked users</a> · <a href="#" id="logout">Sign out</a></span>
+      <a href="#" id="showSources">Sources</a> · <a href="#" id="showGaps">Gaps <span id="gapCount"></span></a> · <span class="super-only"><a href="#" id="showTeams">Teams</a> · <a href="#" id="showInsights">Insights</a> · </span><a href="#" id="showAudit">Audit trail</a> · <span class="super-only"><a href="#" id="showBlocks">Blocked users</a> · </span><a href="#" id="logout">Sign out</a></span>
   </header>
+  <section class="overview"><div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <h2 style="margin:0">Questions</h2>
+      <div class="periods" id="periods"><button data-d="1">Today</button><button data-d="7" class="on">7 days</button><button data-d="30">30 days</button><button data-d="0">All time</button></div>
+    </div>
+    <div class="stats" id="ovStats"></div>
+    <div class="daybars" id="ovBars" title="Per day: answered (green), gaps (red), other (grey)"></div>
+    <div style="overflow:auto" id="ovTeamsBox" hidden><table id="ovTeams"><thead><tr><th>List</th><th>Asked</th><th>Answered</th><th>Gaps</th><th>👎</th><th>Off-topic / spam</th><th>From cache</th></tr></thead><tbody></tbody></table></div>
+    <p class="hint" style="margin:8px 0 0">Answered = got an answer from the docs (not a gap, off-topic, spam or error). Gaps = the docs couldn't answer; they show up under Gaps for drafting.</p>
+  </div></section>
   <main>
     <div>
       <div class="card files"><h2>Files</h2><div id="files"></div></div>
@@ -131,6 +180,74 @@
       </div>
     </div>
   </main>
+  <section class="card" id="sources" hidden style="max-width:1100px;margin:0 auto 24px">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <h2 style="margin:0">Knowledge sources</h2><button class="btn" id="closeSources">Close</button></div>
+    <p class="hint">GitHub repos and Google Chat spaces. Each one becomes an internal document (only people signed in with a company Google account see it; partners never do). Each source is refreshed on its own schedule: only the new commits / messages since the last run are read and merged in.</p>
+    <div class="conn" id="conn"></div>
+    <div class="job" id="jobBox" hidden></div>
+    <h2 style="margin:14px 0 6px">Add sources</h2>
+    <textarea id="srcLinks" style="min-height:90px" placeholder="One link per line:&#10;https://github.com/pharmeasy/some-repo&#10;https://github.com/pharmeasy            (every repo of the org)&#10;https://mail.google.com/chat/u/0/#chat/space/AAAA..."></textarea>
+    <div class="sched"><span>For team</span><select id="srcTeam"></select>
+      <span class="hint" style="margin:0">Only this team's users (who pick it on the chat page) get these documents.</span></div>
+    <div class="sched" id="addSched"></div>
+    <label style="font-size:13px"><input type="checkbox" id="buildNow" checked> Build the documents now (one at a time, in the background)</label>
+    <div class="row"><button class="btn primary" id="addSrc">Add</button></div>
+    <div id="srcMsg"></div>
+    <div id="editBox" class="last" hidden style="margin-top:14px">
+      <strong id="editLabel"></strong>
+      <div class="sched" id="editSched"></div>
+      <div class="row" style="margin-top:4px"><button class="btn primary" id="saveSched">Save schedule</button><button class="btn" id="cancelSched">Cancel</button></div>
+    </div>
+    <div style="overflow:auto;margin-top:14px"><table id="srcTable"><thead><tr><th>Source</th><th>Team</th><th>Schedule</th><th>Status</th><th>Last run</th><th>Next run</th><th></th></tr></thead><tbody></tbody></table></div>
+    <p class="hint" id="noSources">No sources yet.</p>
+  </section>
+  <section class="card" id="gapsSec" hidden style="max-width:1100px;margin:0 auto 24px">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <h2 style="margin:0">Documentation gaps</h2><button class="btn" id="closeGaps">Close</button></div>
+    <p class="hint">Questions the docs couldn't answer (and 👎 answers) are collected during the day. On each list's schedule the AI groups them, looks for the answer in the team's docs, repo code and chats, and drafts the missing section; the admins get an email. Review each draft: edit it if needed, then Add (saved like any update, with history) or Reject (it won't be proposed again). The AI only uses what it found; what it couldn't find is listed under "Needs your answer".</p>
+    <div class="conn" id="gapConn"></div>
+    <div class="sched"><span>List</span><select id="gapBucket"></select><span class="hint" style="margin:0" id="gapWho"></span></div>
+    <div class="sched" id="gapSched"></div>
+    <div class="row" style="margin-top:0"><button class="btn" id="saveGapSched">Save schedule</button><button class="btn" id="runGaps">Draft now</button></div>
+    <div class="hint" id="gapState" style="margin-top:8px"></div>
+    <div id="gapBars"></div>
+    <div id="gapMsg"></div>
+    <h2 style="margin:18px 0 6px">Drafts to review</h2>
+    <div id="drafts"></div>
+    <h2 style="margin:18px 0 6px">Waiting for the next run</h2>
+    <div style="overflow:auto"><table id="newGaps"><thead><tr><th>When</th><th>Missing</th><th>Question</th><th>From</th></tr></thead><tbody></tbody></table></div>
+  </section>
+  <section class="card" id="insights" hidden style="max-width:1100px;margin:0 auto 24px">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <h2 style="margin:0">Insights</h2><button class="btn" id="closeInsights">Close</button></div>
+    <p class="hint">Every question, answer and feedback is saved as JSON (secrets scrubbed, users only as a hash). On the schedule below the AI analyses everything since the last report, the report is saved here and emailed to super admins, and the raw records are cleared so the next period starts fresh. Download the raw JSON any time before that.</p>
+    <div class="stats" id="insStats"></div>
+    <div class="sched" id="insSched"></div>
+    <div class="row" style="margin-top:0"><button class="btn" id="saveInsSched">Save schedule</button><button class="btn" id="runIns">Analyse now</button><button class="btn" id="dlIns">Download JSON so far</button></div>
+    <div class="hint" id="insState" style="margin-top:8px"></div>
+    <div id="insMsg"></div>
+    <h2 style="margin:18px 0 6px">Answer cache</h2>
+    <p class="hint" id="cacheInfo"></p>
+    <div class="row" style="margin-top:0"><button class="btn" id="clearCache">Clear the cache</button></div>
+    <h2 style="margin:18px 0 6px">Reports</h2>
+    <div style="overflow:auto"><table id="repTable"><thead><tr><th>Created</th><th>Questions</th><th>Users</th><th>Gaps</th><th>👍 / 👎</th><th></th></tr></thead><tbody></tbody></table></div>
+    <pre class="report" id="repText" hidden></pre>
+  </section>
+  <section class="card" id="teams" hidden style="max-width:1100px;margin:0 auto 24px">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <h2 style="margin:0">Teams</h2><button class="btn" id="closeTeams">Close</button></div>
+    <p class="hint">Each team has its own internal knowledge (its repos, Chat spaces and notes) and its own admins. Team admins sign in here with Google and can only manage their team's sources and documents. Super admins (<span id="superList"></span>) manage everything; they are set in ADMIN_EMAILS.</p>
+    <div style="overflow:auto"><table id="teamTable"><thead><tr><th>Team</th><th>Admins (emails, comma separated)</th><th>Sources</th><th>Docs</th><th></th></tr></thead><tbody></tbody></table></div>
+    <h2 style="margin:18px 0 6px">Add a team</h2>
+    <div class="row" style="align-items:center">
+      <input type="text" id="teamName" placeholder="Name, e.g. Payments" style="max-width:220px">
+      <input type="text" id="teamSlug" placeholder="id, e.g. payments" style="max-width:180px">
+      <input type="text" id="teamDesc" placeholder="Short description (shown to users)" style="max-width:340px">
+      <button class="btn primary" id="addTeam">Add team</button>
+    </div>
+    <div id="teamMsg"></div>
+  </section>
   <section class="card" id="blocks" hidden style="max-width:1100px;margin:0 auto 24px">
     <div style="display:flex;align-items:center;justify-content:space-between">
       <h2 style="margin:0">Blocked users</h2><button class="btn" id="closeBlocks">Close</button></div>
@@ -158,12 +275,13 @@
 <script>
 const $ = (id) => document.getElementById(id);
 let code = sessionStorage.getItem("adminCode") || "";   // local-development fallback only
+let adminMe = null, teamNames = {};
 let current = null, previewed = null, version = null;
 
 const HINTS = {
   section: "Paste one or more sections, each starting with a heading (e.g. \"## 5. Slots\"). Each replaces the section with the same title; new titles are added at the end. Everything else in the file stays as it is.",
   replace: "Paste the complete new file. It replaces the live file; the old one is kept under Earlier versions.",
-  new: "Create a new knowledge file. Use a name like 05-topic.md; files load in name order.",
+  new: "Create a new knowledge file. Use a name like 05-topic.md (partners see it), or internal/notes/topic.md for staff-only knowledge.",
 };
 const mode = () => document.querySelector("input[name=mode]:checked").value;
 
@@ -185,11 +303,20 @@ async function loadFiles() {
   const data = await call("/api/admin/files");
   version = data.version; $("ver").textContent = version.slice(0, 16);
   $("files").innerHTML = "";
-  for (const f of data.files) {
+  let group = null;
+  const groupOf = (f) => !f.staff_only ? "Partner docs" : f.team ? `Team: ${teamNames[f.team] || f.team}` : "Shared internal (all teams)";
+  const files = [...data.files].sort((a, b) => groupOf(a) === groupOf(b) ? 0 : groupOf(a) === "Partner docs" ? -1 : groupOf(b) === "Partner docs" ? 1 : groupOf(a).localeCompare(groupOf(b)));
+  if (!files.length) $("files").innerHTML = '<p class="hint">No documents for your team yet. Add sources (Sources link above), or create a note with "New file".</p>';
+  for (const f of files) {
+    if (groupOf(f) !== group) {
+      group = groupOf(f);
+      $("files").insertAdjacentHTML("beforeend", `<div class="grp"></div>`);
+      $("files").lastElementChild.textContent = group;
+    }
     const b = document.createElement("button");
     b.title = f.last ? `${f.name}\nLast modified ${new Date(f.last.ts).toLocaleString()} by ${f.last.admin}` : f.name;
     b.innerHTML = `<span></span><small>${Math.round(f.chars / 1000)}k</small>`;
-    b.firstChild.textContent = f.name;
+    b.firstChild.textContent = f.staff_only ? f.name.replace(/^internal\/(?:[a-z][a-z0-9-]+\/)?(repos|gchat|notes)\//, "$1/") : f.name;
     b.className = f.name === current ? "on" : "";
     b.onclick = () => selectFile(f.name);
     $("files").appendChild(b);
@@ -199,7 +326,7 @@ async function selectFile(name) {
   current = name; resetPreview(); show();
   $("editTitle").textContent = `Update ${name}`;
   await loadFiles();
-  const data = await call(`/api/admin/files/${encodeURIComponent(name)}`);
+  const data = await call(`/api/admin/files/${name.split("/").map(encodeURIComponent).join("/")}`);
   showLast(data.last_modified);
   $("history").innerHTML = "";
   $("noHistory").hidden = data.history.length > 0;
@@ -276,7 +403,7 @@ $("apply").onclick = async () => {
 };
 $("loadCurrent").onclick = async () => {
   if (!current) return show("err", "Pick a file first.");
-  const data = await call(`/api/admin/files/${encodeURIComponent(current)}`);
+  const data = await call(`/api/admin/files/${current.split("/").map(encodeURIComponent).join("/")}`);
   document.querySelector("input[value=replace]").click();
   $("text").value = data.text; resetPreview();
 };
@@ -294,8 +421,14 @@ $("modeHint").textContent = HINTS.section;
 async function start() {
   try {
     const me = await call("/api/admin/me");
+    adminMe = me; teamNames = me.team_names || {};
     $("me").textContent = me.admin;
+    $("roleBadge").textContent = me.super ? "SUPER ADMIN" : `TEAM ADMIN · ${me.teams.map((t) => teamNames[t] || t).join(", ")}`;
+    document.querySelectorAll(".super-only").forEach((el) => (el.hidden = !me.super));
+    if (!me.super) HINTS.new = `Create a staff-only note for your team, named like ${me.teams.map((t) => `internal/${t}/notes/topic.md`).join(" or ")}.`;
+    $("modeHint").textContent = HINTS[mode()];
     await loadFiles();
+    loadOverview().catch(() => {});
     $("login").hidden = true; $("app").hidden = false;
     return true;
   } catch (e) {
@@ -309,7 +442,7 @@ async function onGoogle(resp) {
   try {
     await call("/api/admin/google-login", { credential: resp.credential });
     code = ""; sessionStorage.removeItem("adminCode"); loginError();
-    await start();
+    if (await start()) openFromHash();
   } catch (e) { loginError(e.message); }
 }
 async function setupLogin() {
@@ -326,7 +459,7 @@ async function setupLogin() {
 }
 $("loginForm").onsubmit = async (e) => {
   e.preventDefault(); code = $("code").value.trim();
-  if (await start()) { sessionStorage.setItem("adminCode", code); loginError(); }
+  if (await start()) { sessionStorage.setItem("adminCode", code); loginError(); openFromHash(); }
   else { code = ""; loginError("That admin code isn't valid."); }
 };
 $("logout").onclick = async (e) => {
@@ -414,7 +547,358 @@ $("blockBtn").onclick = async () => {
   catch (e) { alert(e.message); }
 };
 
-(async () => { if (!(await start())) await setupLogin(); })();
+/* ---------- knowledge sources ---------- */
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+let srcData = null, editing = null, srcTimer = null;
+
+// A schedule picker: weekly (days + time), every N days (+ time) or manual. Returns a getter.
+function picker(el, sch) {
+  sch = sch || { type: "weekly", days: [4], time: "17:00" };
+  const days = sch.type === "weekly" ? sch.days : [4];
+  el.innerHTML = `<span>Refresh</span>
+    <select class="t"><option value="weekly">every week on</option><option value="every">every N days</option><option value="manual">only when I press Run</option></select>
+    <span class="days">${DAYS.map((d, i) => `<label><input type="checkbox" value="${i}" ${days.includes(i) ? "checked" : ""}>${d}</label>`).join("")}</span>
+    <span class="n">every <input type="number" min="1" max="90" value="${sch.type === "every" ? sch.days : 7}"> days</span>
+    <span class="at">at <input type="time" value="${sch.time || "17:00"}"></span>
+    <span class="hint" style="margin:0">(${srcData?.timezone || "Asia/Kolkata"} time)</span>`;
+  const t = el.querySelector(".t");
+  const sync = () => {
+    el.querySelector(".days").hidden = t.value !== "weekly";
+    el.querySelector(".n").hidden = t.value !== "every";
+    el.querySelector(".at").hidden = t.value === "manual";
+  };
+  t.value = sch.type; t.onchange = sync; sync();
+  return () => t.value === "manual" ? { type: "manual" }
+    : t.value === "every" ? { type: "every", days: +el.querySelector(".n input").value, time: el.querySelector(".at input").value }
+    : { type: "weekly", days: [...el.querySelectorAll(".days input:checked")].map((x) => +x.value), time: el.querySelector(".at input").value };
+}
+let addSchedule = null, editSchedule = null;
+const when = (ts) => ts ? `${new Date(ts).toLocaleString()}` : "-";
+
+function srcMsg(kind, text) { $("srcMsg").innerHTML = text ? `<div class="${kind}"></div>` : ""; if (text) $("srcMsg").firstChild.textContent = text; }
+
+async function showSources() {
+  srcData = await call("/api/admin/sources");
+  if (!addSchedule) addSchedule = picker($("addSched"), srcData.default_schedule);
+  const ts = $("srcTeam"), keep = ts.value;
+  ts.innerHTML = srcData.teams.map((t) => `<option value="${t.slug}"></option>`).join("")
+    + (srcData.can_shared ? '<option value="">Shared (all teams)</option>' : "");
+  [...ts.options].forEach((o) => { if (o.value) o.textContent = teamNames[o.value] || o.value; });
+  if ([...ts.options].some((o) => o.value === keep)) ts.value = keep;
+  const g = srcData.github, c = srcData.gchat;
+  $("conn").innerHTML = `<span>GitHub: <b class="${g.mode === "git" || g.token ? "yes" : "no"}">${g.mode === "git" ? "your git login on this computer" : g.token ? "API token" : "token missing (GITHUB_TOKEN)"}</b>${g.orgs.length ? ` · orgs: ${esc(g.orgs.join(", "))}` : ""}</span>
+    <span>Google Chat: <b class="${c.connected ? "yes" : "no"}">${c.connected ? "connected" : "not connected"}</b></span>
+    <span>Scheduler: <b class="${srcData.scheduler ? "yes" : "no"}">${srcData.scheduler ? "on" : "off"}</b></span>`;
+  const j = srcData.jobs;
+  $("jobBox").hidden = !j.current && !j.queued.length;
+  $("jobBox").textContent = (j.current ? `Running: ${j.current.label} (${j.current.mode === "full" ? "full build" : "update"}): ${j.current.progress}` : "")
+    + (j.queued.length ? `${j.current ? " · " : ""}${j.queued.length} waiting in the queue` : "");
+  const body = $("srcTable").querySelector("tbody"); body.innerHTML = "";
+  $("noSources").hidden = srcData.sources.length > 0;
+  for (const s of srcData.sources) {
+    const tr = document.createElement("tr");
+    const st = s.state;
+    tr.innerHTML = `<td><a target="_blank" rel="noopener"></a><div class="hint" style="margin:0"></div></td>
+      <td></td><td></td><td><span class="st ${st.status}"></span><div class="hint" style="margin:0;max-width:320px"></div></td><td></td><td></td><td><div class="src-actions"></div></td>`;
+    const a = tr.querySelector("a"); a.href = s.url; a.textContent = s.label;
+    tr.cells[0].querySelector("div").textContent = `${s.kind === "github" ? "GitHub" : "Google Chat"} → ${s.doc}`;
+    tr.cells[1].textContent = s.team ? (teamNames[s.team] || s.team) : "Shared";
+    tr.cells[2].textContent = s.enabled ? s.schedule_text : `Paused (${s.schedule_text})`;
+    tr.cells[3].querySelector("span").textContent = st.status.replace("_", " ");
+    tr.cells[3].querySelector("div").textContent = st.message || "";
+    tr.cells[4].textContent = when(st.last_run);
+    tr.cells[5].textContent = s.enabled ? when(st.next_run) : "-";
+    const act = tr.querySelector(".src-actions");
+    const btn = (label, title, fn) => { const b = document.createElement("button"); b.className = "btn"; b.textContent = label; b.title = title; b.onclick = fn; act.appendChild(b); };
+    const busy = st.status === "running" || st.status === "queued";
+    btn("Run", "Pick up only what changed since the last run", () => runSource(s, "auto"));
+    btn("Rebuild", "Build the whole document again from scratch", () => runSource(s, "full"));
+    btn("Schedule", "Change when this source is refreshed", () => editSource(s));
+    btn(s.enabled ? "Pause" : "Resume", s.enabled ? "Stop scheduled refreshes" : "Start scheduled refreshes again", async () => {
+      await call(`/api/admin/sources/${encodeURIComponent(s.id)}/settings`, { enabled: !s.enabled }).catch((e) => alert(e.message)); showSources();
+    });
+    btn("Remove", "Remove this source", () => removeSource(s));
+    if (busy) act.querySelectorAll("button").forEach((b) => { if (["Run", "Rebuild", "Remove"].includes(b.textContent)) b.disabled = true; });
+    body.appendChild(tr);
+  }
+  $("sources").hidden = false;
+  clearTimeout(srcTimer);
+  // Keep the table fresh while jobs run.
+  if (!$("sources").hidden && (j.current || j.queued.length)) srcTimer = setTimeout(() => showSources().catch(() => {}), 4000);
+}
+async function runSource(s, mode) {
+  if (mode === "full" && !confirm(`Rebuild the whole document for ${s.label}? This reads the full ${s.kind === "github" ? "repo" : "chat history"} again and takes longer.`)) return;
+  try { await call(`/api/admin/sources/${encodeURIComponent(s.id)}/run`, { mode }); } catch (e) { alert(e.message); }
+  showSources();
+}
+function editSource(s) {
+  editing = s; $("editBox").hidden = false; $("editLabel").textContent = `Schedule for ${s.label}`;
+  editSchedule = picker($("editSched"), s.schedule);
+  $("editBox").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+$("cancelSched").onclick = () => { editing = null; $("editBox").hidden = true; };
+$("saveSched").onclick = async () => {
+  try {
+    await call(`/api/admin/sources/${encodeURIComponent(editing.id)}/settings`, { schedule: editSchedule() });
+    $("editBox").hidden = true; editing = null; showSources();
+  } catch (e) { alert(e.message); }
+};
+async function removeSource(s) {
+  if (!confirm(`Remove ${s.label} from the sources?`)) return;
+  const deleteDoc = confirm(`Also delete its document (${s.doc}) from the knowledge?\nOK = delete it (a copy stays in Earlier versions), Cancel = keep the document.`);
+  try { await call(`/api/admin/sources/${encodeURIComponent(s.id)}/remove`, { delete_doc: deleteDoc }); } catch (e) { alert(e.message); }
+  showSources(); loadFiles();
+}
+$("addSrc").onclick = async () => {
+  const links = $("srcLinks").value.trim();
+  if (!links) return srcMsg("err", "Paste at least one link.");
+  srcMsg();
+  try {
+    const r = await call("/api/admin/sources", { links, team: $("srcTeam").value || null, schedule: addSchedule(), build_now: $("buildNow").checked });
+    const parts = [`Added ${r.added.length}`];
+    if (r.skipped.length) parts.push(`${r.skipped.length} already there`);
+    if (r.queued) parts.push(`${r.queued} queued to build`);
+    srcMsg(r.errors.length ? "warn" : "ok", parts.join(" · ") + (r.errors.length ? `. Problems: ${r.errors.map((e) => `${e.link}: ${e.error}`).join(" | ")}` : "."));
+    if (r.added.length) $("srcLinks").value = "";
+    showSources();
+  } catch (e) { srcMsg("err", e.message); }
+};
+$("showSources").onclick = (e) => { e.preventDefault(); showSources().then(() => $("sources").scrollIntoView({ behavior: "smooth" })).catch((err) => show("err", err.message)); };
+$("closeSources").onclick = () => { $("sources").hidden = true; clearTimeout(srcTimer); };
+
+/* ---------- documentation gaps ---------- */
+let gapData = null, gapSchedule = null;
+function gapMsg(kind, text) { $("gapMsg").innerHTML = text ? `<div class="${kind}"></div>` : ""; if (text) $("gapMsg").firstChild.textContent = text; }
+async function loadGapCount() {
+  try {
+    const d = await call("/api/admin/gaps");
+    const n = d.buckets.reduce((a, b) => a + b.proposals.length, 0);
+    $("gapCount").textContent = n ? `(${n})` : "";
+  } catch {}
+}
+async function showGaps(pick) {
+  gapData = await call("/api/admin/gaps");
+  const sel = $("gapBucket"), keep = pick || sel.value;
+  sel.innerHTML = gapData.buckets.map((b) => `<option value="${b.bucket}"></option>`).join("");
+  [...sel.options].forEach((o, i) => { const b = gapData.buckets[i]; o.textContent = `${b.name}${b.proposals.length ? ` (${b.proposals.length} drafts)` : ""}`; });
+  if ([...sel.options].some((o) => o.value === keep)) sel.value = keep;
+  $("gapConn").innerHTML = `<span>Email: <b class="${gapData.gmail ? "yes" : "no"}">${gapData.gmail ? "Gmail connected" : "not connected (run scripts/connect_gmail.py)"}</b></span>`;
+  renderBucket();
+  $("gapsSec").hidden = false;
+  $("gapCount").textContent = gapData.buckets.reduce((a, b) => a + b.proposals.length, 0) ? `(${gapData.buckets.reduce((a, b) => a + b.proposals.length, 0)})` : "";
+}
+function renderBucket() {
+  const b = gapData.buckets.find((x) => x.bucket === $("gapBucket").value);
+  if (!b) { $("drafts").innerHTML = '<p class="hint">No gap lists for you.</p>'; return; }
+  $("gapWho").textContent = `Emails go to: ${b.recipients.join(", ") || "nobody (add team admins in Teams)"}`;
+  gapSchedule = picker($("gapSched"), b.schedule);
+  const st = b.state;
+  $("gapState").textContent = `${b.schedule_text}. Last run: ${st.last_run ? new Date(st.last_run).toLocaleString() : "never"}`
+    + `${st.message ? ` (${st.message})` : ""}. Next: ${st.next_run ? new Date(st.next_run).toLocaleString() : "-"}.`;
+  const days = Object.entries(b.per_day), max = Math.max(1, ...days.map(([, n]) => n));
+  $("gapBars").innerHTML = days.length ? `<div class="hint" style="margin:8px 0 0">Gaps per day (last 14 days)</div><div class="bars">${days.map(([d, n]) => `<div title="${d}: ${n}" style="height:${Math.round(n / max * 100)}%"></div>`).join("")}</div>` : "";
+  const box = $("drafts"); box.innerHTML = "";
+  if (!b.proposals.length) box.innerHTML = '<p class="hint">No drafts waiting. New ones appear after the next run.</p>';
+  for (const p of b.proposals) box.appendChild(draftCard(b, p));
+  const body = $("newGaps").querySelector("tbody"); body.innerHTML = "";
+  for (const g of [...b.new].reverse()) {
+    const tr = document.createElement("tr");
+    cells(tr, [new Date(g.ts).toLocaleString(), g.topic, g.question.slice(0, 220), g.source === "feedback" ? "👎 feedback" : "answer"]);
+    body.appendChild(tr);
+  }
+  if (!b.new.length) body.innerHTML = '<tr><td colspan="4" class="hint">Nothing waiting.</td></tr>';
+}
+function draftCard(b, p) {
+  const el = document.createElement("div"); el.className = "draft";
+  el.innerHTML = `<h3></h3>
+    <div class="hint" style="margin:0 0 6px"><span class="conf ${p.confidence}">${p.confidence} confidence</span> · asked ${p.gap_ids.length}x · ${new Date(p.created).toLocaleString()}</div>
+    <details><summary>Questions that triggered it</summary><ul class="qs"></ul></details>
+    <details><summary>Evidence the AI used</summary><ul class="ev"></ul></details>
+    <div class="warn oq" hidden><strong>Needs your answer</strong><ul></ul>Add the answers to the text below before adding it, or reject the draft.</div>
+    <div class="warn it" hidden></div>
+    <label class="hint" style="display:block;margin:8px 0 4px">Goes into (file)</label>
+    <input type="text" class="tf">
+    <label class="hint" style="display:block;margin:8px 0 4px">Section to add (edit freely)</label>
+    <textarea class="md"></textarea>
+    <div class="row"><button class="btn pv">Preview changes</button><button class="btn primary ad">Add</button><button class="btn rj">Reject</button></div>
+    <div class="res"></div><pre class="diff" hidden></pre>`;
+  el.querySelector("h3").textContent = p.summary;
+  const li = (ul, items) => items.forEach((t) => { const x = document.createElement("li"); x.textContent = t; ul.appendChild(x); });
+  li(el.querySelector(".qs"), p.questions);
+  li(el.querySelector(".ev"), p.evidence.length ? p.evidence : [p.code_note || "No evidence found"]);
+  if (p.code_note && p.evidence.length) li(el.querySelector(".ev"), [`Code search: ${p.code_note}`]);
+  if (p.open_questions.length) { el.querySelector(".oq").hidden = false; li(el.querySelector(".oq ul"), p.open_questions); }
+  if (p.internal_terms?.length) { const w = el.querySelector(".it"); w.hidden = false; w.textContent = `Internal names in a partner draft: ${p.internal_terms.join(", ")}. Rewrite them in partner terms before adding.`; }
+  el.querySelector(".tf").value = p.target_file;
+  el.querySelector(".md").value = p.markdown || `## ${p.topic || "Answer"}\n\n`;
+  const body = () => ({ markdown: el.querySelector(".md").value, target_file: el.querySelector(".tf").value.trim() });
+  const res = (kind, text) => { const r = el.querySelector(".res"); r.innerHTML = `<div class="${kind}"></div>`; r.firstChild.textContent = text; };
+  const url = (a) => `/api/admin/gaps/${encodeURIComponent(b.bucket)}/proposals/${encodeURIComponent(p.id)}/${a}`;
+  el.querySelector(".pv").onclick = async () => {
+    try { const r = await call(url("preview"), body()); const d = el.querySelector(".diff"); d.hidden = false; renderDiff(d, r.diff || "No changes."); res("ok", r.actions.map((a) => `${a.action}: ${a.section}`).join(" · ")); }
+    catch (e) { res("err", e.message); }
+  };
+  el.querySelector(".ad").onclick = async () => {
+    if (!confirm(`Add this to ${body().target_file}? Users get it within a minute.`)) return;
+    try { await call(url("accept"), body()); res("ok", "Added."); setTimeout(() => showGaps(b.bucket), 800); loadFiles(); }
+    catch (e) { res("err", e.message); }
+  };
+  el.querySelector(".rj").onclick = async () => {
+    const reason = prompt("Why reject it? (helps the AI not propose it again)", ""); if (reason === null) return;
+    try { await call(url("reject"), { reason }); showGaps(b.bucket); } catch (e) { res("err", e.message); }
+  };
+  return el;
+}
+$("gapBucket").onchange = renderBucket;
+$("saveGapSched").onclick = async () => {
+  try { const r = await call(`/api/admin/gaps/${encodeURIComponent($("gapBucket").value)}/schedule`, { schedule: gapSchedule() }); gapMsg("ok", `Saved: ${r.schedule_text}.`); showGaps($("gapBucket").value); }
+  catch (e) { gapMsg("err", e.message); }
+};
+$("runGaps").onclick = async () => {
+  try { await call(`/api/admin/gaps/${encodeURIComponent($("gapBucket").value)}/run`, {}); gapMsg("ok", "Queued. Drafts appear here when it finishes (see Sources for progress)."); }
+  catch (e) { gapMsg("err", e.message); }
+};
+$("showGaps").onclick = (e) => { e.preventDefault(); showGaps().then(() => $("gapsSec").scrollIntoView({ behavior: "smooth" })).catch((err) => show("err", err.message)); };
+$("closeGaps").onclick = () => { $("gapsSec").hidden = true; };
+
+/* ---------- question counts ---------- */
+let ovDays = 7;
+async function loadOverview() {
+  const d = await call(`/api/admin/stats?days=${ovDays}`);
+  const t = d.total;
+  const stat = (v, l, cls = "") => `<div class="stat ${cls}"><b>${v ?? 0}</b><span>${l}</span></div>`;
+  $("ovStats").innerHTML = stat(t.asked, "questions asked")
+    + stat(`${t.answered}${t.answered_pct != null ? ` (${t.answered_pct}%)` : ""}`, "answered from the docs", "good")
+    + stat(t.gaps, "gaps (not in the docs)", t.gaps ? "bad" : "") + stat(t.down, "👎 answers", t.down ? "bad" : "")
+    + stat(t.up, "👍 answers") + stat(t.off_topic + t.spam, "off-topic / spam") + stat(t.cached, "from cache (no AI)")
+    + (t.errors ? stat(t.errors, "AI errors", "bad") : "");
+  const days = Object.entries(d.per_day), max = Math.max(1, ...days.map(([, x]) => x.asked));
+  $("ovBars").innerHTML = days.map(([day, x]) => {
+    const h = (n) => `${Math.round(n / max * 100)}%`, other = Math.max(0, x.asked - x.answered - x.gaps);
+    return `<div class="d" title="${day}: ${x.asked} asked, ${x.answered} answered, ${x.gaps} gaps"><div class="a" style="height:${h(x.answered)}"></div><div class="g" style="height:${h(x.gaps)}"></div><div class="o" style="height:${h(other)}"></div></div>`;
+  }).join("");
+  const rows = Object.entries(d.per_bucket);
+  $("ovTeamsBox").hidden = rows.length < 2;
+  const body = $("ovTeams").querySelector("tbody"); body.innerHTML = "";
+  for (const [b, x] of rows.sort((p, q) => q[1].asked - p[1].asked)) {
+    const tr = document.createElement("tr");
+    cells(tr, [d.names[b] || b, x.asked, `${x.answered}${x.answered_pct != null ? ` (${x.answered_pct}%)` : ""}`, x.gaps, x.down, x.off_topic + x.spam, x.cached]);
+    body.appendChild(tr);
+  }
+}
+document.querySelectorAll("#periods button").forEach((b) => b.onclick = () => {
+  ovDays = +b.dataset.d;
+  document.querySelectorAll("#periods button").forEach((x) => x.classList.toggle("on", x === b));
+  loadOverview().catch(() => {});
+});
+
+/* ---------- insights (super admins) ---------- */
+let insSchedule = null;
+function insMsg(kind, text) { $("insMsg").innerHTML = text ? `<div class="${kind}"></div>` : ""; if (text) $("insMsg").firstChild.textContent = text; }
+async function showInsights() {
+  const d = await call("/api/admin/insights");
+  const n = d.collected;
+  const stat = (v, l) => `<div class="stat"><b>${v ?? 0}</b><span>${l}</span></div>`;
+  $("insStats").innerHTML = stat(n.questions, "questions since last report") + stat(n.users, "users")
+    + stat(n.answered_from_cache, "answered from cache") + stat(n.gaps, "not answered (gaps)")
+    + stat(`${n.feedback_up ?? 0} / ${n.feedback_down ?? 0}`, "👍 / 👎") + stat(n.off_topic, "off-topic");
+  insSchedule = picker($("insSched"), d.state.schedule);
+  const st = d.state;
+  $("insState").textContent = `${d.schedule_text}. Last run: ${st.last_run ? new Date(st.last_run).toLocaleString() : "never"}`
+    + `${st.message ? ` (${st.message})` : ""}. Next: ${st.next_run ? new Date(st.next_run).toLocaleString() : "-"}.`
+    + (d.gmail ? "" : " Email not connected (scripts/connect_gmail.py).");
+  const c = d.cache;
+  $("cacheInfo").textContent = c.enabled
+    ? `${c.saved} saved answers. Since the server started: ${c.hits} answered from the cache, ${c.misses} needed the AI. Answers are kept ${c.days} days and reset whenever the knowledge changes; a 👎 removes that answer.`
+    : "The answer cache is off (ANSWER_CACHE_ENABLED=false).";
+  const body = $("repTable").querySelector("tbody"); body.innerHTML = "";
+  for (const r of d.reports) {
+    const tr = document.createElement("tr"), x = r.numbers;
+    cells(tr, [new Date(r.created).toLocaleString(), x.questions, x.users, x.gaps, `${x.feedback_up} / ${x.feedback_down}`]);
+    const td = document.createElement("td"), b = document.createElement("button");
+    b.className = "btn"; b.textContent = "Open";
+    b.onclick = async () => { const full = await call(`/api/admin/insights/reports/${encodeURIComponent(r.id)}`); $("repText").hidden = false; $("repText").textContent = full.markdown; $("repText").scrollIntoView({ behavior: "smooth" }); };
+    td.appendChild(b); tr.appendChild(td); body.appendChild(tr);
+  }
+  if (!d.reports.length) body.innerHTML = '<tr><td colspan="6" class="hint">No reports yet.</td></tr>';
+  $("insights").hidden = false;
+}
+$("saveInsSched").onclick = async () => {
+  try { const r = await call("/api/admin/insights/schedule", { schedule: insSchedule() }); insMsg("ok", `Saved: ${r.schedule_text}.`); showInsights(); }
+  catch (e) { insMsg("err", e.message); }
+};
+$("runIns").onclick = async () => {
+  if (!confirm("Analyse everything recorded so far now? The raw records are cleared after the report is written.")) return;
+  try { await call("/api/admin/insights/run", {}); insMsg("ok", "Queued. The report appears here when it's done (progress under Sources)."); }
+  catch (e) { insMsg("err", e.message); }
+};
+$("dlIns").onclick = async () => {
+  const res = await fetch("/api/admin/insights/export", { headers: code ? { "X-Admin-Code": code } : {}, credentials: "same-origin" });
+  if (!res.ok) { insMsg("err", `Download failed (${res.status})`); return; }
+  const url = URL.createObjectURL(await res.blob()), a = document.createElement("a");
+  a.href = url; a.download = `interactions-${new Date().toISOString().slice(0, 10)}.json`; a.click(); URL.revokeObjectURL(url);
+};
+$("clearCache").onclick = async () => {
+  if (!confirm("Clear all saved answers? The next questions will all go to the AI again.")) return;
+  try { const r = await call("/api/admin/cache/clear", {}); insMsg("ok", `Removed ${r.removed} saved answers.`); showInsights(); }
+  catch (e) { insMsg("err", e.message); }
+};
+$("showInsights").onclick = (e) => { e.preventDefault(); showInsights().then(() => $("insights").scrollIntoView({ behavior: "smooth" })).catch((err) => show("err", err.message)); };
+$("closeInsights").onclick = () => { $("insights").hidden = true; };
+
+/* ---------- teams (super admins) ---------- */
+function teamMsg(kind, text) { $("teamMsg").innerHTML = text ? `<div class="${kind}"></div>` : ""; if (text) $("teamMsg").firstChild.textContent = text; }
+async function showTeams() {
+  const data = await call("/api/admin/teams");
+  $("superList").textContent = data.super_admins.join(", ") || "none";
+  teamNames = Object.fromEntries(data.teams.map((t) => [t.slug, t.name]));
+  const body = $("teamTable").querySelector("tbody"); body.innerHTML = "";
+  for (const t of data.teams) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td><strong></strong><div class="hint" style="margin:0"></div></td>
+      <td><input type="text" style="min-width:280px"></td><td></td><td></td>
+      <td><div class="src-actions"><button class="btn">Save</button><button class="btn">Remove</button></div></td>`;
+    tr.querySelector("strong").textContent = t.name;
+    tr.querySelector(".hint").textContent = `id: ${t.slug}${t.description ? " · " + t.description : ""}`;
+    const input = tr.querySelector("input"); input.value = t.admins.join(", ");
+    input.placeholder = "admin emails, comma separated";
+    tr.cells[2].textContent = t.sources; tr.cells[3].textContent = t.docs;
+    const [save, remove] = tr.querySelectorAll("button");
+    save.onclick = async () => {
+      try {
+        await call(`/api/admin/teams/${encodeURIComponent(t.slug)}`, { admins: input.value.split(/[,\s]+/).filter(Boolean) });
+        teamMsg("ok", `Saved admins for ${t.name}. They can sign in to /admin with Google now.`); showTeams();
+      } catch (e) { teamMsg("err", e.message); }
+    };
+    remove.onclick = async () => {
+      if (!confirm(`Remove the team ${t.name}?`)) return;
+      try { await call(`/api/admin/teams/${encodeURIComponent(t.slug)}/remove`, {}); teamMsg("ok", "Removed."); showTeams(); }
+      catch (e) { teamMsg("err", e.message); }
+    };
+    body.appendChild(tr);
+  }
+  $("teams").hidden = false;
+}
+$("teamName").oninput = () => { if (!$("teamSlug").dataset.touched) $("teamSlug").value = $("teamName").value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""); };
+$("teamSlug").oninput = () => { $("teamSlug").dataset.touched = "1"; };
+$("addTeam").onclick = async () => {
+  try {
+    await call("/api/admin/teams", { name: $("teamName").value.trim(), slug: $("teamSlug").value.trim(), description: $("teamDesc").value.trim() });
+    $("teamName").value = $("teamSlug").value = $("teamDesc").value = ""; delete $("teamSlug").dataset.touched;
+    teamMsg("ok", "Team added. Add its admins in the table above."); showTeams();
+  } catch (e) { teamMsg("err", e.message); }
+};
+$("showTeams").onclick = (e) => { e.preventDefault(); showTeams().then(() => $("teams").scrollIntoView({ behavior: "smooth" })).catch((err) => show("err", err.message)); };
+$("closeTeams").onclick = () => { $("teams").hidden = true; };
+
+// Links in the gap emails open the Gaps section: /admin#gaps=<list>
+async function openFromHash() {
+  const m = location.hash.match(/^#gaps(?:=([\w-]+))?/);
+  loadGapCount();
+  if (location.hash === "#insights" && adminMe?.super) { await showInsights(); $("insights").scrollIntoView({ behavior: "smooth" }); return; }
+  if (m) { await showGaps(m[1]); $("gapsSec").scrollIntoView({ behavior: "smooth" }); }
+}
+(async () => { if (await start()) openFromHash(); else await setupLogin(); })();
 </script>
 </body>
 </html>

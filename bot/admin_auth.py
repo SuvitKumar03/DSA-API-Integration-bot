@@ -28,8 +28,8 @@ SESSION_COOKIE = "admin_session"
 SESSION_HOURS = 8
 
 _SECRET = config.ADMIN_SESSION_SECRET.encode() if config.ADMIN_SESSION_SECRET else secrets.token_bytes(32)
-if not config.ADMIN_SESSION_SECRET and config.ADMIN_EMAILS:
-    log.warning("ADMIN_SESSION_SECRET is not set: admin sessions end when the server restarts and "
+if not config.ADMIN_SESSION_SECRET and (config.ADMIN_EMAILS or config.USER_LOGIN == "google"):
+    log.warning("ADMIN_SESSION_SECRET is not set: sign-ins end when the server restarts and "
                 "don't work across several instances. Set it in production.")
 
 
@@ -49,14 +49,17 @@ def _unb64(text: str) -> bytes:
     return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
 
 
-def make_session(email: str) -> str:
-    payload = _b64(json.dumps({"email": email.lower(), "exp": int(time.time()) + SESSION_HOURS * 3600}).encode())
+def make_session(email: str, aud: str = "admin", hours: float = SESSION_HOURS, **extra) -> str:
+    """A signed cookie value. `aud` keeps admin and chat-user sessions apart: one can never be
+    used as the other."""
+    body = {"email": email.lower(), "aud": aud, "exp": int(time.time() + hours * 3600), **extra}
+    payload = _b64(json.dumps(body).encode())
     sig = _b64(hmac.new(_SECRET, payload.encode(), hashlib.sha256).digest())
     return f"{payload}.{sig}"
 
 
-def read_session(token: str | None) -> str | None:
-    """The email in a valid, unexpired session cookie, or None."""
+def read_session_data(token: str | None, aud: str = "admin") -> dict | None:
+    """The contents of a valid, unexpired session cookie for `aud`, or None."""
     if not token or "." not in token:
         return None
     payload, sig = token.rsplit(".", 1)
@@ -67,7 +70,15 @@ def read_session(token: str | None) -> str | None:
         data = json.loads(_unb64(payload))
     except ValueError:
         return None
-    return data["email"] if data.get("exp", 0) > time.time() else None
+    if data.get("aud", "admin") != aud or data.get("exp", 0) <= time.time():
+        return None
+    return data
+
+
+def read_session(token: str | None) -> str | None:
+    """The email in a valid admin session cookie, or None."""
+    data = read_session_data(token, "admin")
+    return data["email"] if data else None
 
 
 def verify_google_credential(credential: str) -> dict:

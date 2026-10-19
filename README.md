@@ -6,12 +6,17 @@ A chatbot that answers B2B partners' integration questions using the Thyrocare p
 
 ## Architecture (current build)
 
-Four parts:
+Nine parts:
 
-1. **Answering:** a partner asks, the AI answers from the docs. *Uses the AI.*
-2. **Session memory:** a short summary of the partner's past chats, kept in their own browser. *Uses the AI to write the summary.*
+1. **Answering:** a user asks, the AI answers from the docs. *Uses the AI.*
+2. **Session memory and saved chats:** each user signs in with Google; their chats and a short summary of them are saved in their own account. *Uses the AI to write the summary.*
 3. **Knowledge admin:** admins update the docs section by section. *No AI: plain text matching.*
 4. **Learning from chats:** past Google Chat Q&A becomes the FAQ. *Scripts, plus Claude for the extraction step.*
+5. **Partners and internal users:** company Google accounts (`@pharmeasy.in`, `@thyrocare.in`) also get the internal knowledge; partners only ever see the partner docs. *No AI.*
+6. **Knowledge sources:** admins add GitHub repo links and Google Chat space links; each becomes an internal doc, refreshed on its own schedule from only what changed. *Uses the AI to write and update the docs.*
+9. **Insights and answer cache:** every interaction is saved as JSON and analysed weekly by the AI (then cleared); repeated first questions are answered from a cache with no AI call. *AI for the weekly report only.*
+8. **Documentation gaps:** questions the docs couldn't answer are collected; once a day per team the AI researches them and drafts the missing sections, emails the team admins, and an admin adds or rejects each draft. *Uses the AI to group and draft.*
+7. **Teams:** super admin → team admins (one or more per team, e.g. Demand, Reporting). Each team has its own internal knowledge; internal users pick a team on the chat page and get that team's answers. *No AI.*
 
 Legend used in the diagrams: 🤖 = an AI model is called here. ⚙️ = plain code, no AI.
 
@@ -48,18 +53,17 @@ Legend used in the diagrams: 🤖 = an AI model is called here. ⚙️ = plain c
 flowchart TB
     subgraph Browsers["Browsers"]
         direction LR
-        UI["Partner chat page<br/>app/static/index.html"]
-        LS[("localStorage ia.memory.v1<br/>summary ≤120 words")]
+        UI["Chat page<br/>app/static/index.html"]
         AUI["Admin page<br/>app/static/admin.html"]
-        UI <--> LS
     end
 
-    subgraph Server["FastAPI server: app/main.py<br/>⚙️ partner access codes · Google admin sign-in · rate limit · logging · audit"]
+    subgraph Server["FastAPI server: app/main.py<br/>⚙️ Google sign-in (users and admins) · rate limit · logging · audit"]
         direction LR
         CHAT["/api/chat"]
         SUM["/api/summarize"]
         FB["/api/feedback"]
-        ADM["/api/admin/*<br/>files · preview · apply · restore"]
+        CONV["/api/conversations<br/>/api/me · /api/memory"]
+        ADM["/api/admin/*<br/>files · preview · apply · restore<br/>sources · run · schedule"]
     end
 
     subgraph Bot["bot/  (settings from .env via config.py)"]
@@ -69,12 +73,16 @@ flowchart TB
         ENGINE["engine.py<br/>provider switch"]
         SECT["⚙️ sections.py<br/>section merge + diff"]
         STORE["⚙️ knowledge_store.py<br/>read/write · history · version"]
+        USERS["⚙️ users.py<br/>role · saved chats · memory"]
+        RET["⚙️ retrieval.py<br/>internal catalog + search"]
+        JOBS["jobs.py · sources.py<br/>queue · scheduler<br/>github_docs · gchat_docs"]
     end
 
     subgraph Data["Files and storage"]
         direction LR
         TERMS[("internal_terms.txt<br/>git-ignored")]
-        KN[("knowledge/*.md<br/>or GCS bucket")]
+        KN[("knowledge/*.md + internal/<br/>or GCS bucket")]
+        UD[("data/ or bucket<br/>users · sources")]
         LOGS[("logs/<br/>chats · feedback")]
         AUD[("_audit/<br/>admin audit trail")]
     end
@@ -86,19 +94,27 @@ flowchart TB
         CC["Local Claude Code CLI<br/>testing only"]
     end
 
-    UI -- "question + history + summary" --> CHAT
-    UI -- "new messages + old summary" --> SUM
+    UI -- "question + conversation id" --> CHAT
+    UI -- "conversation id" --> SUM
+    UI --> CONV --> USERS
     UI -- "👍 / 👎" --> FB
     AUI -- "Google sign-in → session cookie" --> ADM
 
+    CHAT --> USERS
     CHAT --> PROMPT
+    PROMPT --> RET --> STORE
     PROMPT --> STORE
     PROMPT --> ENGINE
     SUM --> ENGINE
     ENGINE --> AI
     AI -- "answer stream" --> GUARD
     GUARD -- "filtered answer" --> UI
-    SUM -. "summary, not stored" .-> UI
+    SUM --> USERS
+    USERS --> UD
+    ADM --> JOBS
+    JOBS --> ENGINE
+    JOBS --> STORE
+    JOBS --> UD
     ADM --> SECT --> STORE
     ADM --> AUD
     STORE --> KN
@@ -119,12 +135,13 @@ sequenceDiagram
     participant E as engine.py
     participant AI as 🤖 AI provider
 
-    B->>M: POST {messages (last 20), summary}<br/>header X-Access-Code
-    M->>M: check access code, rate limit, length
+    B->>M: POST {new question, conversation id}<br/>cookie user_session (Google sign-in)
+    M->>M: who is it (partner / internal), rate limit, length
+    M->>M: saved conversation (last 20) + saved memory
     M->>G: probe_flags(question): log only, never blocks
     M->>G: clean the summary (secrets + internal names)
-    M->>E: stream_answer(history, summary)
-    E->>P: system_blocks(summary)
+    M->>E: stream_answer(history, summary, audience,<br/>internal sections if internal)
+    E->>P: system_blocks(summary, audience, extra)
     P->>S: current_version(): re-checked at most every 60 s
     alt version changed (admin updated the docs)
         P->>S: read every *.md (README.md skipped)
@@ -134,8 +151,9 @@ sequenceDiagram
     E->>AI: system prompt + conversation
     AI-->>E: answer, streamed in pieces
     E-->>M: pieces
-    M->>G: StreamRedactor: replaces internal names,<br/>holds back 80 chars so a split name is still caught
-    M-->>B: filtered answer, streamed
+    M->>G: partners only: StreamRedactor replaces internal names,<br/>holds back 80 chars so a split name is still caught
+    M-->>B: answer, streamed
+    M->>M: save the turn in the user's conversation
     M->>M: append to logs/chats.jsonl<br/>(secrets scrubbed, summary text never logged)
 ```
 
@@ -145,29 +163,36 @@ sequenceDiagram
 |---|---|---|
 | 1. Instructions | Role, answer only from docs, name the API family, language rule, confidentiality rules, safety | Yes (identical every time) |
 | 2. Documentation | Every `knowledge/*.md` file after sanitising, wrapped in `<document name="...">` | Yes, until the docs change |
-| 3. Partner context | The browser's summary, marked as untrusted background | No (differs per partner) |
+| 3. Partner context | The user's saved memory, marked as untrusted background | No (differs per user) |
+
+Internal users get `INTERNAL_INSTRUCTIONS` instead of block 1, a catalog of the internal docs after
+block 2 (cached), and the internal sections matching the question before block 3 (see section 8).
 | Messages | The last 20 turns of the current chat | No |
 
-### 3. Session memory (kept only in the partner's browser)
+### 3. Session memory and saved chats (per user, in their account)
+
+Everyone signs in with Google (`USER_LOGIN=google`). Each user's data lives apart under
+`users/<hash of email>/` in the data store (`data/` locally, the bucket on Cloud Run): their saved
+chats (the sidebar's "Your chats") and their memory. Nobody else's chats are visible or writable.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant B as Browser (index.html)
-    participant LS as localStorage "ia.memory.v1"
     participant M as app/main.py /api/summarize
+    participant U as bot/users.py (users/<uid>/)
     participant AI as 🤖 AI provider
 
     Note over B: Trigger: 10 min idle (SUMMARY_IDLE_MINUTES),<br/>12 new messages (SUMMARY_EVERY_MESSAGES),<br/>"New chat", or tab hidden / closed
-    B->>LS: read the old summary
-    B->>M: POST {new messages only, old summary}
+    B->>M: POST {conversation id, first message not yet summarised}
+    M->>U: read the saved conversation and the old memory
     M->>M: scrub secrets from the transcript
     M->>AI: SUMMARY_INSTRUCTIONS: ≤120 words, language & style,<br/>APIs used, stage, problems & fixes,<br/>never tokens, IDs, patient data or internal names
     AI-->>M: new summary
     M->>M: scrub again, cap at 1,200 chars
-    M-->>B: summary (the server keeps no copy)
-    B->>LS: save {summary, updatedAt}
-    Note over B,LS: Shown in the sidebar ("What I remember").<br/>Sent with every question. Deleted by Forget,<br/>by logout, or after 30 days (SUMMARY_TTL_DAYS).
+    M->>U: save memory.json
+    M-->>B: summary
+    Note over B,U: Shown in the sidebar ("What I remember").<br/>Added to every question by the server. Deleted by Forget,<br/>ignored after 30 days without an update (SUMMARY_TTL_DAYS).
 ```
 
 ### 4. Knowledge admin: updating the docs (no AI)
@@ -252,13 +277,142 @@ flowchart LR
     FAQ --> BOT["Bot answers"]
 ```
 
+### 8. Partners and internal users
+
+| | Partner (any other Google account) | Internal (verified Workspace account on `INTERNAL_DOMAINS`) |
+|---|---|---|
+| Knowledge | Partner docs (`knowledge/*.md`) only | Partner docs + catalog of internal docs + the internal sections that match the question |
+| Instructions | `INSTRUCTIONS`: public API contract only | `INTERNAL_INSTRUCTIONS`: internal names allowed, secrets never |
+| Answer filter | `StreamRedactor` hides internal names | None |
+
+Internal means Google's `hd` claim equals the email's domain, so a personal Google account that
+uses a work address is still a partner. The internal docs are too big to send whole (one per repo),
+so `bot/retrieval.py` picks the best-matching sections (BM25 keyword search, understands camelCase
+and snake_case) up to `INTERNAL_CONTEXT_CHARS`, plus a one-line-per-doc catalog that stays in
+the cached part of the prompt.
+
+### 9. Knowledge sources: GitHub repos and Google Chat spaces (admin > Sources)
+
+```mermaid
+flowchart LR
+    A["Admin pastes links<br/>repo, whole org, or Chat space<br/>+ schedule"] --> R[("sources/registry.json")]
+    S["⚙️ Scheduler, every minute<br/>or Cloud Scheduler → /api/cron/tick"] -->|due sources| Q["⚙️ Job queue<br/>one job at a time"]
+    A -->|"Run / Rebuild"| Q
+    Q --> G{"GitHub or Chat?"}
+    G -->|"GitHub, first time"| F["⚙️ download master tarball<br/>pick files, blank secrets"] --> FA["🤖 notes per batch<br/>then one doc in fixed sections"]
+    G -->|"GitHub, later"| D["⚙️ compare last commit...head<br/>no new commits = stop"] --> DA["🤖 rewrite only the affected sections<br/>+ change log line"]
+    G -->|"Chat"| C["⚙️ new messages only<br/>clean_chat.py redaction"] --> CA["🤖 extraction_prompt.md<br/>new Q&A appended per API area"]
+    FA --> K[("internal/repos/owner__repo.md<br/>internal/gchat/space.md")]
+    DA --> K
+    CA --> K
+    K -->|"history, version bump, audit trail"| BOT["Internal users' answers"]
+```
+
+- **Schedules** are per source: every week on chosen days at a time (default Friday 17:00),
+  every N days at a time, or manual only. Times are in `SCHEDULE_TIMEZONE` (Asia/Kolkata).
+  Admins can pause, resume, run now (delta), rebuild from scratch or remove a source.
+- **GitHub** is read either with a read-only `GITHUB_TOKEN` (`GITHUB_AUTH=token`; servers) or
+  with the computer's own git login (`GITHUB_AUTH=git`: `bot/git_local.py` keeps one blobless clone
+  per repo in `data/git/`, used for builds, diffs and code search; no token or org approval, but
+  whole-org links need the API). Only repos of `GITHUB_ORGS` can be added. A link to the org
+  (`https://github.com/pharmeasy`) adds every active repo. A diff bigger than `DELTA_MAX_CHARS`
+  (or a force-push) rebuilds the doc instead. Secret files (`.env`, keys, credentials) are never
+  read, and secret-looking values are blanked before code reaches the AI.
+- **Google Chat** uses the admin's own sign-in (`chat_export/token.json`, made once by
+  `python chat_export/export_gchat.py --list-spaces`). Each run reads only messages since the
+  last one (with two days before as context) and adds new entries; earlier entries and manual
+  edits stay. Automated Chat docs are internal only; anything for partners still goes through
+  the reviewed FAQ (section 7).
+- Every change is saved like an admin edit: old version in history, audit record, "Last
+  modified" on the admin page, and all instances reload.
+
+### 10. Teams: super admin, team admins, team knowledge
+
+| Who | Can do |
+|---|---|
+| Super admin (`ADMIN_EMAILS`) | Everything: partner docs, shared internal docs, every team's docs and sources, teams and their admins, blocked users, full audit trail |
+| Team admin (added per team on the admin page, Teams) | Only their team: its sources (repos, Chat spaces) and internal docs (`internal/<team>/...`), its audit events |
+| Internal user | Picks a team on the chat page (or All teams) |
+| Partner | Unchanged: partner docs only, never sees teams |
+
+- The first teams come from `DEFAULT_TEAMS` in `.env` (team names stay out of the public code); super admins add,
+  rename or remove teams and set each team's admins (emails). Rights are checked on every request.
+- Each team's knowledge is kept apart: `internal/<team>/repos|gchat|notes/*.md`. The same repo can
+  be a source of several teams: each gets its own doc on its own schedule. Docs outside a team
+  folder are shared by all teams.
+- With a team chosen, the catalog and the search only cover that team's docs plus the shared ones,
+  and the instructions tell the AI to answer the way that team's systems work. So when the same
+  name exists in the Demand and the Reporting repos, a Reporting user gets the Reporting answer.
+- A conversation stays in the team it started in; switching team starts a new chat.
+- The chat page opens on a start page: sign in with Google, then (internal users) choose a team.
+  The chat appears only after both. The choice is remembered in the browser; the top bar switches team.
+
+### 11. Documentation gaps (admin > Gaps)
+
+```mermaid
+flowchart LR
+    Q["Answer the docs can't give<br/>AI adds hidden [[GAP: topic]]"] -->|"⚙️ stripped, saved"| G[("gaps/items/team/")]
+    F["👎 with a comment"] --> G
+    S["⚙️ Daily per team<br/>default 15:00 IST"] --> J["🤖 group duplicates<br/>skip rejected / not gaps"]
+    G --> J
+    J --> R["⚙️ research: team docs,<br/>GitHub code search, internal docs"]
+    R --> D["🤖 draft section + evidence<br/>+ open questions (no invented facts)"]
+    D --> P[("gaps/proposals/team/")]
+    P --> M["⚙️ email to team admins<br/>(Gmail, link to /admin#gaps)"]
+    P --> A{"Admin: edit, preview"}
+    A -->|Add| K[("notes file or partner doc<br/>history + audit")]
+    A -->|Reject| X["remembered, not proposed again"]
+```
+
+- Lists: one per team (its admins), plus "shared" (internal users asking across all teams) and
+  "partner" (partner docs); both of those go to super admins. Each list has its own schedule.
+- Internal drafts only go into the team's notes files (`internal/<team>/notes/`), because repo and
+  Chat docs are rewritten by their sources. Partner drafts go into partner docs and show the
+  internal-terms warning.
+- What the AI couldn't find is listed as "Needs your answer"; the admin types it in before Add.
+- Emails come from the account connected with `python scripts/connect_gmail.py` (send-only).
+
+### 12. Insights (admin > Insights) and the answer cache
+
+- **Records:** each question, answer (shortened), feedback and spam reply is saved in
+  `analytics/events/` (secrets scrubbed, users as a hash, never emails): audience, team, turn,
+  latency, tokens, cached, gap, off-topic.
+- **Weekly report** (default Monday 10:00 IST, super admin can change it): numbers computed by code,
+  notes by the AI per batch, then one report (topics, where users struggle, FAQ candidates,
+  suggestions). Saved, emailed to super admins, then the raw records are deleted. "Download JSON
+  so far" gives the raw records at any time.
+- **Answer cache** (`bot/answer_cache.py`): the first question of a conversation, normalised
+  (case, spaces, trailing ?), with the same audience, team and knowledge version, gets the saved
+  answer instantly. Never cached: follow-ups, gaps, off-topic, errors, stopped answers. A 👎 or
+  any knowledge change removes it. Live test: 6.8 s with the AI, 0.0 s from the cache.
+
+### 13. Question counts (top of the admin page)
+
+Running counters per day and per list (team, shared, partner), kept for good (not cleared by the
+weekly insights): asked, answered from the docs, gaps, 👍 / 👎, off-topic / spam, from cache, AI
+errors. Today / 7 days / 30 days / all time. Team admins see their team; super admins every list.
+Stored in `stats/daily/<date>.json` (`bot/stats.py`).
+
 ### Files
 
 | File | What it does | AI? |
 |---|---|---|
 | `app/main.py` | FastAPI server: `/`, `/admin`, `/api/config`, `/api/login`, `/api/chat`, `/api/summarize`, `/api/feedback`, `/api/admin/*`, `/healthz`; access and admin codes, rate limit, logging, startup checks | Calls the engine |
-| `app/static/index.html` | Partner chat page: streaming markdown, copy buttons, 👎 feedback, session memory in localStorage, login | No |
-| `app/static/admin.html` | Admin page: Google sign-in, files, section update / replace / new, red-green preview, reason, apply, history, restore, audit trail | No |
+| `app/static/index.html` | Chat page: Google sign-in, saved chats, streaming markdown, copy buttons, 👎 feedback, memory card | No |
+| `app/static/admin.html` | Admin page: Google sign-in, files (partner and internal), section update / replace / new, red-green preview, reason, apply, history, restore, audit trail, knowledge sources with schedules | No |
+| `bot/users.py` | Who is internal; each user's saved chats and memory | No |
+| `bot/teams.py` | Teams, super admins and team admins | No |
+| `bot/analytics.py` | Interaction records, weekly AI report, flush | 🤖 Yes (report) |
+| `bot/stats.py` | Daily question counters for the admin page | No |
+| `bot/answer_cache.py` | Saved answers for repeated first questions | No |
+| `bot/gaps.py` | Gap marker, gap records, daily grouping, research and drafts, proposals | 🤖 Yes |
+| `bot/mailer.py`, `scripts/connect_gmail.py` | Sends gap emails from the connected Gmail account | No |
+| `bot/blobs.py` | Storage for app data (users, sources): local folder or GCS bucket | No |
+| `bot/retrieval.py` | Internal docs catalog and keyword search for internal users | No |
+| `bot/sources.py` | Source list and schedules | No |
+| `bot/jobs.py` | Job queue (one at a time), scheduler, saving generated docs with audit | No |
+| `bot/github_docs.py` | Repo → doc: download, file choice, secret blanking, full build and weekly delta | 🤖 Yes |
+| `bot/gchat_docs.py` | Chat space → doc: read new messages, clean, extract Q&A, append | 🤖 Yes |
 | `bot/admin_auth.py` | Who is an admin: Google ID-token check, signed session cookie, IAP header, dev codes | No |
 | `bot/config.py` | Reads every setting from `.env` | No |
 | `bot/prompt.py` | Instructions, docs block (reloaded on version change), partner-context block, summary instructions | No (builds the prompt) |
@@ -281,8 +435,15 @@ flowchart LR
 
 | Data | Where | Kept for |
 |---|---|---|
-| Partner's session summary | Partner's browser only (`localStorage`, key `ia.memory.v1`) | 30 days, or until Forget / logout |
-| Current chat | Browser memory only (gone on reload) | The open page |
+| User's session summary | `users/<uid>/memory.json` in the data store (`data/` or the bucket) | Used for 30 days after its last update, until Forget |
+| User's chats | `users/<uid>/conversations/` and `index.json` in the data store | Last 200 per user (`MAX_CONVERSATIONS`), until deleted |
+| Source list, schedules, run history | `sources/registry.json` in the data store | Live (last 20 runs per source) |
+| Teams and team admins | `teams/registry.json` in the data store | Live |
+| Interaction records (for insights) | `analytics/events/` in the data store | Until the next weekly report |
+| Insights reports | `analytics/reports/` | Kept |
+| Saved answers (cache) | `cache/answers/` | 7 days, or until the knowledge changes |
+| Documentation gaps and drafts | `gaps/items/`, `gaps/proposals/`, `gaps/state.json` in the data store | Fixed/dismissed gaps 60 days |
+| Internal docs (repos, Chat spaces) | `internal/` next to the knowledge (folder or bucket) | Live, with history |
 | Questions and answers | `logs/chats.jsonl` on the server, secrets scrubbed | Until deleted |
 | Feedback | `logs/feedback.jsonl` | Until deleted |
 | Admin audit trail (sign-ins, changes with diffs and reasons) | `_audit/` next to the knowledge (local folder or GCS bucket), one file per month locally | Kept (append-only) |
@@ -336,7 +497,19 @@ To share the private files with a teammate: `scripts/pack-private.sh` creates `p
 | `KNOWLEDGE_BACKEND` | `local` | `local` (`knowledge/` folder) or `gcs` (Cloud Storage bucket, with `KNOWLEDGE_BUCKET`, `KNOWLEDGE_PREFIX`) |
 | `KNOWLEDGE_REFRESH_SECONDS` | `60` | How often each instance checks for updated docs |
 | `INTERNAL_TERMS_FILE` | `internal_terms.txt` | Internal names to hide; required when `ACCESS_CODES` is set |
-| `SUMMARY_IDLE_MINUTES`, `SUMMARY_EVERY_MESSAGES`, `SUMMARY_TTL_DAYS` | `10`, `12`, `30` | When the browser memory is summarised, and when it expires |
+| `SUMMARY_IDLE_MINUTES`, `SUMMARY_EVERY_MESSAGES`, `SUMMARY_TTL_DAYS` | `10`, `12`, `30` | When a user's memory is summarised, and when it expires |
+| `USER_LOGIN` | `google` if `GOOGLE_CLIENT_ID` is set, else `none` | `google`: everyone signs in, chats saved per user. `none`: local testing |
+| `INTERNAL_DOMAINS` | `pharmeasy.in,thyrocare.in` | Workspace domains whose users are internal |
+| `LOCAL_USER_INTERNAL` | `false` | With `USER_LOGIN=none`, treat the local user (localhost only) as internal |
+| `DATA_BACKEND`, `DATA_DIR`, `DATA_BUCKET`, `DATA_PREFIX` | follow `KNOWLEDGE_*`, `data/` | Where users' chats, memory and the source list are saved |
+| `GITHUB_TOKEN`, `GITHUB_ORGS` | empty, `pharmeasy` | Read-only token for repo sources; allowed orgs |
+| `REPO_MAX_CHARS`, `REPO_BATCH_CHARS`, `DELTA_MAX_CHARS` | `900000`, `150000`, `200000` | Code read per repo, per AI call, and the biggest diff handled as a delta |
+| `GCHAT_TOKEN_FILE` | `chat_export/token.json` | Google sign-in used to read Chat spaces |
+| `INTERNAL_CONTEXT_CHARS` | `60000` | Internal doc sections added to an internal user's question |
+| `GAP_DEFAULT_TIME`, `GAP_MAX_DRAFTS` | `15:00`, `10` | Default daily gap run time, drafts per list per run |
+| `GMAIL_TOKEN_FILE`, `PUBLIC_URL` | `chat_export/gmail_token.json`, `http://localhost:8000` | Gmail sender token; app address for email links |
+| `DEFAULT_TEAMS` | empty | Teams created the first time (`slug:Name,...`); then managed on the admin page |
+| `SCHEDULER_ENABLED`, `SCHEDULE_TIMEZONE`, `CRON_SECRET` | `true`, `Asia/Kolkata`, empty | Source refresh scheduler; secret for `POST /api/cron/tick` |
 
 ## Deploy
 

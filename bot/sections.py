@@ -78,6 +78,24 @@ def apply_update(doc: str, update: str) -> tuple[str, list[dict]]:
     return "\n".join(lines).rstrip("\n") + "\n", actions
 
 
+def append_to_sections(doc: str, additions: dict[str, list[str]], level: int = 2) -> str:
+    """Add lines at the end of the sections with these titles (creating missing ones at the end).
+    Unlike apply_update, what is already in a section stays untouched."""
+    lines = doc.rstrip("\n").splitlines()
+    for title, new_lines in additions.items():
+        heads = _headings(lines)
+        match = next(((i, lv) for i, lv, t in heads if t == _norm(title) and lv == level), None)
+        if match:
+            start, lv = match
+            end = next((i for i, l, _ in heads if i > start and l <= lv), len(lines))
+            while end > start + 1 and not lines[end - 1].strip():
+                end -= 1
+            lines[end:end] = [""] + new_lines
+        else:
+            lines += ["", f"{'#' * level} {title}", ""] + new_lines
+    return "\n".join(lines) + "\n"
+
+
 def unified_diff(old: str, new: str, name: str) -> str:
     return "".join(difflib.unified_diff(
         old.splitlines(keepends=True), new.splitlines(keepends=True),

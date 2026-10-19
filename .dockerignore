@@ -4,3 +4,9 @@
 logs
 *.pdf
 __pycache__
+data
+chat_export/output
+chat_export/token.json
+chat_export/credentials.json
+chat_export/private_names.json
+chat_export/gmail_token.json
