@@ -24,7 +24,7 @@ from datetime import datetime, timedelta
 from bot import sources
 from bot.blobs import read_json, write_json
 
-FIELDS = ("asked", "answered", "gaps", "cached", "off_topic", "spam", "errors", "up", "down", "strikes", "blocks")
+FIELDS = ("asked", "answered", "gaps", "cached", "local", "ai", "off_topic", "spam", "errors", "up", "down", "strikes", "blocks")
 _lock = threading.Lock()
 
 
@@ -99,7 +99,10 @@ def dashboard(buckets: list[str], days: int | None) -> dict:
         row["days"] = len(row.pop("_seen", ()))
     rows = sorted(users.values(), key=lambda r: (-r["asked"], r["email"]))
     return {"total": {**total, "users": len(rows), "blocked_users": sum(1 for r in rows if r["blocks"]),
-                      "answered_pct": round(100 * total["answered"] / total["asked"]) if total["asked"] else None},
+                      "answered_pct": round(100 * total["answered"] / total["asked"]) if total["asked"] else None,
+                      # Of the questions that got an answer: how many skipped the AI (local model or cache).
+                      "saved_pct": round(100 * (total["local"] + total["cached"]) / served) if (served := total["local"]
+                                   + total["cached"] + total["ai"]) else None},
             "per_day": per_day, "reasons": dict(sorted(reasons.items(), key=lambda kv: -kv[1])),
             "strike_hours": strike_hours, "block_hours": block_hours, "users": rows,
             "since": names[0] if names else None}

@@ -76,6 +76,7 @@
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   .scroll { max-height: 520px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
   .bad { color: var(--critical); font-weight: 600; }
+  .tile b.good { color: var(--good); }
   .pill { font-size: 11px; border: 1px solid var(--border); border-radius: 99px; padding: 1px 7px; color: var(--ink-2); margin-right: 3px; }
   .numtable { margin-top: 8px; max-height: 260px; overflow: auto; }
   .login { max-width: 380px; margin: 14vh auto; background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 28px; text-align: center; }
@@ -127,6 +128,14 @@
         <button class="toggle" data-table="tStrikes">Show numbers</button><div class="numtable" id="tStrikes" hidden></div>
       </section>
     </div>
+
+    <section class="card" style="margin-bottom:14px">
+      <h2>Who answered: local model, cache or Claude</h2>
+      <p class="sub">Local model = FAQ answer from the small model, cache = saved earlier answer (both free); Claude = an AI call. Spam replies are not counted.</p>
+      <div class="legend"><span><i style="background:var(--s3)"></i>Local model</span><span><i style="background:var(--s2)"></i>Cache</span><span><i style="background:var(--s1)"></i>Claude (AI call)</span></div>
+      <div class="chart" id="cSource"></div>
+      <button class="toggle" data-table="tSource">Show numbers</button><div class="numtable" id="tSource" hidden></div>
+    </section>
 
     <div class="grid2">
       <section class="card">
@@ -305,7 +314,10 @@ function render() {
     + tile(t.gaps, "missed (docs had no answer)", t.asked ? `${Math.round(100 * t.gaps / t.asked)}% of questions` : "")
     + tile(t.strikes, "times users misbehaved", "strikes given") + tile(t.blocks, "times a user was blocked", "2-hour blocks", t.blocks ? "bad" : "")
     + tile(t.blocked_users, "users blocked", "at least once") + tile(d.blocked_now.length, "blocked right now", "", d.blocked_now.length ? "bad" : "")
-    + tile(t.down, "👎 answers") + tile(t.cached, "answered from cache", "no AI call");
+    + tile(t.down, "👎 answers")
+    + tile(t.ai, "sent to Claude", "AI calls")
+    + tile(t.local, "answered by local model", "no AI call") + tile(t.cached, "answered from cache", "no AI call")
+    + tile(t.saved_pct != null ? `${t.saved_pct}%` : "–", "AI calls saved", "local model + cache, of all answers", t.saved_pct ? "good" : "");
   const cats = d.per_day.map((x) => x.date), lab = (c, long) => long ? new Date(c + "T00:00").toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }) : shortDate(c);
   const other = d.per_day.map((x) => Math.max(0, x.asked - x.answered - x.gaps));
   columns($("cQuestions"), cats, [
@@ -313,6 +325,14 @@ function render() {
     { name: "Gaps", color: css("--s2"), values: d.per_day.map((x) => x.gaps) },
     { name: "Other", color: css("--s3"), values: other }], { stacked: true, labelOf: lab });
   numTable($("tQuestions"), ["Day", "Asked", "Answered", "Gaps", "Other"], d.per_day.map((x, i) => [x.date, x.asked, x.answered, x.gaps, other[i]]));
+  columns($("cSource"), cats, [
+    { name: "Local model", color: css("--s3"), values: d.per_day.map((x) => x.local) },
+    { name: "Cache", color: css("--s2"), values: d.per_day.map((x) => x.cached) },
+    { name: "Claude", color: css("--s1"), values: d.per_day.map((x) => x.ai) }], { stacked: true, labelOf: lab });
+  numTable($("tSource"), ["Day", "Local model", "Cache", "Claude", "AI calls saved"], d.per_day.map((x) => {
+    const all = x.local + x.cached + x.ai;
+    return [x.date, x.local, x.cached, x.ai, all ? `${Math.round(100 * (x.local + x.cached) / all)}%` : "–"];
+  }));
   lines($("cStrikes"), cats, [
     { name: "Strikes", color: css("--s1"), values: d.per_day.map((x) => x.strikes) },
     { name: "Blocks", color: css("--s2"), values: d.per_day.map((x) => x.blocks) }], { labelOf: lab });

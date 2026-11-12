@@ -1,6 +1,7 @@
 """Runtime settings, read from environment variables (see .env.example)."""
 
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -171,6 +172,41 @@ PUBLIC_URL = os.getenv("PUBLIC_URL", "http://localhost:8000").rstrip("/")
 # instead of a new AI call. Any knowledge change starts a fresh cache; a 👎 removes that answer.
 ANSWER_CACHE_ENABLED = os.getenv("ANSWER_CACHE_ENABLED", "true").lower() == "true"
 ANSWER_CACHE_DAYS = float(os.getenv("ANSWER_CACHE_DAYS", "7"))
+
+# ---------------------------------------------------------------- local FAQ model
+# A small model (bot/local_model.py, trained by scripts/train_local_model.py) answers first
+# questions that clearly match a curated FAQ entry, without an AI call. Off until trained.
+LOCAL_MODEL_ENABLED = os.getenv("LOCAL_MODEL_ENABLED", "true").lower() == "true"
+LOCAL_MODEL_AUDIENCES = {a.strip() for a in os.getenv("LOCAL_MODEL_AUDIENCES", "partner").split(",") if a.strip()}
+# Training picks the threshold that answers the most questions at this precision or better.
+LOCAL_MODEL_TARGET_PRECISION = float(os.getenv("LOCAL_MODEL_TARGET_PRECISION", "0.97"))
+# Retraining job (bot/local_model_train.py): daily at this time, plus 30 min after the FAQ
+# questions change. Only new FAQ entries and new real questions cost AI calls.
+LOCAL_MODEL_RETRAIN = os.getenv("LOCAL_MODEL_RETRAIN", "true").lower() == "true"
+LOCAL_MODEL_RETRAIN_TIME = os.getenv("LOCAL_MODEL_RETRAIN_TIME", "02:00")
+
+# ---------------------------------------------------------------- order logs
+# Internal users only (bot/order_logs.py): a question with an order / lead ID gets that order's log
+# lines from the log search in the prompt. Off until LOGS_URL and LOGS_API_KEY (or LOGS_USERNAME + LOGS_PASSWORD) are set.
+LOGS_URL = os.getenv("LOGS_URL", "").rstrip("/")             # include /s/<space> for a space
+ELASTICSEARCH_URL = os.getenv("ELASTICSEARCH_URL", "").rstrip("/")  # optional: query Elasticsearch directly
+LOGS_API_KEY = os.getenv("LOGS_API_KEY", "")                 # the encoded API key (Authorization: ApiKey ...)
+LOGS_USERNAME = os.getenv("LOGS_USERNAME", "")               # or a read-only user's login (basic auth)
+LOGS_PASSWORD = os.getenv("LOGS_PASSWORD", "")
+LOGS_INDEX = os.getenv("LOGS_INDEX", "logs-*")               # index pattern to search
+# Other index per team: "team:index-pattern,team2:pattern2" (team slugs as on the admin page).
+LOGS_INDEX_BY_TEAM = dict(p.split(":", 1) for p in os.getenv("LOGS_INDEX_BY_TEAM", "").split(",") if ":" in p)
+LOGS_TIME_FIELD = os.getenv("LOGS_TIME_FIELD", "@timestamp")
+# Fields that hold the order ID (comma-separated); empty = search all fields.
+LOGS_ORDER_FIELDS = [f.strip() for f in os.getenv("LOGS_ORDER_FIELDS", "").split(",") if f.strip()]
+LOGS_LOOKBACK_DAYS = int(os.getenv("LOGS_LOOKBACK_DAYS", "30"))
+LOGS_MAX_HITS = int(os.getenv("LOGS_MAX_HITS", "100"))
+LOGS_MAX_CHARS = int(os.getenv("LOGS_MAX_CHARS", "20000"))    # log text per order in the prompt
+LOGS_TIMEOUT_SECONDS = float(os.getenv("LOGS_TIMEOUT_SECONDS", "15"))
+# What counts as an order ID in a question (default: 8-20 digits, or 1-6 letters + 5+ digits like SP83281753).
+ORDER_ID_PATTERN = re.compile(os.getenv("ORDER_ID_PATTERN", r"(?<![\w-])(?:[A-Za-z]{1,6}\d{5,}|\d{8,20})(?![\w-])"))
+# Teams that get order lookups (comma-separated slugs); empty = every internal user.
+ORDER_LOOKUP_TEAMS = {t.strip() for t in os.getenv("ORDER_LOOKUP_TEAMS", "").split(",") if t.strip()}
 
 # ---------------------------------------------------------------- interaction insights
 # Every question, answer and feedback is saved as JSON (secrets scrubbed). On the insights

@@ -1,6 +1,7 @@
 """Runs jobs one at a time: source jobs (build or refresh a repo / chat doc) and the daily
 documentation-gap job per team ("gaps:<bucket>", bot/gaps.py), the weekly insights job
-("insights", bot/analytics.py), plus the scheduler.
+("insights", bot/analytics.py), the local FAQ model retraining ("local_model",
+bot/local_model_train.py), plus the scheduler.
 
 One job at a time on purpose: each job makes several long AI calls, and running them in
 parallel overloads a laptop (and the AI quota). Jobs wait in a queue; the admin page shows
@@ -19,7 +20,7 @@ import logging
 import time
 from datetime import timedelta
 
-from bot import analytics, config, gaps, gchat_docs, github_docs, sources
+from bot import analytics, config, gaps, gchat_docs, github_docs, local_model_train, sources
 from bot.github_docs import SourceError
 from bot.knowledge_store import current_version, store
 from bot.sections import unified_diff
@@ -50,6 +51,8 @@ def enqueue(source_id: str, mode: str = "auto", by: str = "scheduler") -> bool:
     _queued.append(job)
     if source_id == "insights":
         analytics.update_state(status="queued", message="Waiting for its turn")
+    elif source_id == "local_model":
+        local_model_train.update_state(status="queued", message="Waiting for its turn")
     elif source_id.startswith("gaps:"):
         gaps.update_state(source_id[5:], status="queued", message="Waiting for its turn")
     else:
@@ -64,6 +67,8 @@ def tick() -> list[str]:
     queued += [f"gaps:{b}" for b in gaps.due(sources.now()) if enqueue(f"gaps:{b}", "auto", "scheduler")]
     if analytics.due(sources.now()) and enqueue("insights", "auto", "scheduler"):
         queued.append("insights")
+    if local_model_train.due(sources.now()) and enqueue("local_model", "auto", "scheduler"):
+        queued.append("local_model")
     if queued:
         log.info("Scheduler queued: %s", queued)
     return queued
@@ -137,10 +142,40 @@ async def _run_insights(job: dict) -> None:
     log.info("Insights job %s: %s (%ds)", outcome, message, time.time() - started)
 
 
+async def _run_local_model(job: dict) -> None:
+    global _current
+    started = time.time()
+    _current = {**job, "label": "Retrain local FAQ model", "started_at": sources.iso(sources.now()),
+                "progress": "Starting"}
+
+    def progress(msg: str) -> None:
+        _current["progress"] = msg
+        log.info("[local_model] %s", msg)
+
+    local_model_train.update_state(status="running", message="Running")
+    try:
+        outcome, message, _ = await local_model_train.run(job["by"], progress, force=job["mode"] == "full")
+    except ImportError:
+        outcome, message = "error", "scikit-learn is not installed (pip install -r requirements.txt)"
+    except Exception as e:
+        log.exception("Local model job failed")
+        outcome, message = "error", f"Unexpected error: {type(e).__name__} (details in the server log)"
+    t = sources.now()
+    st = local_model_train.state()
+    runs = ([{"ts": sources.iso(t), "by": job["by"], "result": outcome, "message": message,
+              "seconds": round(time.time() - started)}] + st.get("runs", []))[:10]
+    local_model_train.update_state(status=outcome, message=message, last_run=sources.iso(t), runs=runs,
+                                   next_run=sources.iso(sources.next_run(st["schedule"], t, t)))
+    log.info("Local model job %s: %s (%ds)", outcome, message, time.time() - started)
+
+
 async def _run(job: dict) -> None:
     global _current
     if job["source"] == "insights":
         await _run_insights(job)
+        return
+    if job["source"] == "local_model":
+        await _run_local_model(job)
         return
     if job["source"].startswith("gaps:"):
         await _run_gaps(job)
@@ -250,6 +285,8 @@ def start() -> None:
             enqueue(src["id"], "auto", "restart")
     if analytics.state().get("status") in ("queued", "running"):
         enqueue("insights", "auto", "restart")
+    if local_model_train.state().get("status") in ("queued", "running"):
+        enqueue("local_model", "auto", "restart")
     for bucket, st in gaps.state().items():
         if st.get("status") in ("queued", "running"):
             enqueue(f"gaps:{bucket}", "auto", "restart")

@@ -385,6 +385,21 @@ flowchart LR
   (case, spaces, trailing ?), with the same audience, team and knowledge version, gets the saved
   answer instantly. Never cached: follow-ups, gaps, off-topic, errors, stopped answers. A 👎 or
   any knowledge change removes it. Live test: 6.8 s with the AI, 0.0 s from the cache.
+- **Local FAQ model** (`bot/local_model.py`): a small text classifier (TF-IDF word + character
+  n-grams → logistic regression; one class per FAQ entry plus OTHER). When a partner's first
+  question matches a curated `04-faq.md` entry with probability ≥ the learned threshold, that
+  entry's answer is returned at once (`X-Answer: local`, ~0.3 ms, plain Python); anything else
+  goes to the AI. Answers are read from the current FAQ, and a 👎 sends that question to the AI
+  from then on.
+- **Self-retraining** (`bot/local_model_train.py`, job `local_model` in the job queue): daily
+  (default 02:00) and 30 minutes after the FAQ's questions change. It keeps partners' first
+  questions in a lasting pool (`local_model/real_questions.json`, text only; the weekly insights
+  job hands them over before it clears the records), asks the AI only for what is new (practice
+  questions for new FAQ entries, labels for new questions), trains, and checks the new model with
+  cross-validation. It replaces the old model only if it meets `LOCAL_MODEL_TARGET_PRECISION`;
+  every server loads it within a minute, so no redeploy. Nothing new = skipped with no AI call.
+  Super admins see status, test scores, history, schedule and "Retrain now" under Insights;
+  results are emailed. `python scripts/train_local_model.py` runs the same pipeline by hand.
 
 ### 13. Question counts (top of the admin page)
 
@@ -419,6 +434,8 @@ Filters: team / list and period (today, 7, 30, 90 days, all time).
 | `bot/stats.py` | Daily counters (questions, strikes, blocks, per user) for the admin page and `/dashboard` | No |
 | `app/static/dashboard.html` | The dashboard page (inline SVG charts) | No |
 | `bot/answer_cache.py` | Saved answers for repeated first questions | No |
+| `bot/order_logs.py`, `scripts/check_order_logs.py` | Order logs from the log search for internal users: an order ID in the question → that order's log timeline in the prompt (scrubbed of tokens, emails, phone numbers) | 🔒 Internal only |
+| `bot/local_model.py`, `bot/local_model_train.py`, `scripts/train_local_model.py` | Local FAQ model (logistic regression) answering clear FAQ matches without the AI; scheduled self-retraining | 🤖 Training data only |
 | `bot/gaps.py` | Gap marker, gap records, daily grouping, research and drafts, proposals | 🤖 Yes |
 | `bot/mailer.py`, `scripts/connect_gmail.py` | Sends gap emails from the connected Gmail account | No |
 | `bot/blobs.py` | Storage for app data (users, sources): local folder or GCS bucket | No |

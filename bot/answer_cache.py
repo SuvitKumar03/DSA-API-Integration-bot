@@ -2,7 +2,7 @@
 
 Only the first question of a conversation is cached (later turns depend on the conversation).
 The key is the question after normalising (lowercase, single spaces, no trailing ? or !), the
-audience (partner / internal), the team and the knowledge version. So:
+audience (partner / internal), the team, the knowledge version and the answer instructions. So:
     - any knowledge change (admin edit, source refresh, gap fix) starts a fresh cache;
     - a partner never gets an internal answer, and each team gets its own team's answer;
     - an answer with a 👎 is removed, and answers that were stopped, off-topic, errors or
@@ -30,8 +30,15 @@ def normalise(question: str) -> str:
     return re.sub(r"[\s?!.]+$", "", q)
 
 
+def _prompt_id() -> str:
+    """Changes when the answer instructions change, so old answers aren't reused."""
+    from bot.prompt import INSTRUCTIONS, INTERNAL_INSTRUCTIONS
+
+    return hashlib.sha256((INSTRUCTIONS + INTERNAL_INSTRUCTIONS).encode()).hexdigest()[:8]
+
+
 def key(question: str, audience: str, team: str | None) -> str:
-    raw = f"{current_version()}|{audience}|{team or '-'}|{normalise(question)}"
+    raw = f"{current_version()}|{_prompt_id()}|{audience}|{team or '-'}|{normalise(question)}"
     return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
 

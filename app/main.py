@@ -17,8 +17,9 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Str
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from bot import admin_auth, analytics, answer_cache, config, gaps, stats, gchat_docs, github_docs, jobs, mailer, retrieval, sources, teams, users
+from bot import admin_auth, analytics, answer_cache, config, gaps, stats, gchat_docs, github_docs, jobs, order_logs, local_model, local_model_train, mailer, retrieval, sources, teams, users
 from bot.abuse import CANNED, Limited, guard
+from bot.blobs import read_json
 from bot.engine import CUT_SHORT_TEXT, ERROR_TEXT, INSTALL_HINT, REFUSAL_TEXT, claude_code_bin, complete, stream_answer
 from bot.guardrails import StreamRedactor, probe_flags, redact, scrub_secrets
 from bot.knowledge_store import current_version, is_internal_name, store, team_of, valid_name
@@ -380,7 +381,10 @@ async def chat(req: ChatRequest, request: Request, x_access_code: str | None = H
 
     # Answer cache: a first question asked before (same audience, team, knowledge) needs no AI call.
     first_turn = len(history) == 1
-    hit = answer_cache.get(question["content"], audience, team) if first_turn and not {"prompt_extraction", "instruction_override"} & set(flags) else None
+    # Questions about a live order (internal users, log search set up) always need fresh logs: no cache.
+    order_lookup = user.is_internal and order_logs.enabled_for(team) and bool(order_logs.order_ids(history))
+    hit = (answer_cache.get(question["content"], audience, team)
+           if first_turn and not order_lookup and not {"prompt_extraction", "instruction_override"} & set(flags) else None)
     if hit:
         text = hit["answer"]
         if cid:
@@ -390,6 +394,19 @@ async def chat(req: ChatRequest, request: Request, x_access_code: str | None = H
                          question=question["content"], answer=text, cached=True, latency_s=0)
         stats.bump(bucket, who, asked=1, answered=1, cached=1)
         return PlainTextResponse(text, headers={"X-Message-Id": message_id, "Cache-Control": "no-cache", "X-Answer": "cached"})
+
+    # Local FAQ model: a first question that clearly matches a curated FAQ entry needs no AI call.
+    local = local_model.answer(question["content"], audience) if first_turn and not flags else None
+    if local:
+        text = local["answer"]
+        if cid:
+            users.save_turn(user, cid, question["content"], text, message_id, team=team)
+        local_model.served(message_id, question["content"], local["entry"])
+        _log(text, local=local["entry"], local_score=local["score"])
+        analytics.record("chat", audience=audience, team=team, user=user.uid, conversation=cid, turn=1,
+                         question=question["content"], answer=text, local=True, latency_s=0, message_id=message_id)
+        stats.bump(bucket, who, asked=1, answered=1, local=1)
+        return PlainTextResponse(text, headers={"X-Message-Id": message_id, "Cache-Control": "no-cache", "X-Answer": "local"})
 
     # Cheap spam checks first: these never reach the AI.
     reason = guard.precheck(subjects, question["content"])
@@ -413,6 +430,11 @@ async def chat(req: ChatRequest, request: Request, x_access_code: str | None = H
 
     # Internal users: the internal sections that match the question (none for partners).
     extra = retrieval.context_for(history, team) if user.is_internal else ""
+    # Internal users only: live logs for an order ID in the question (never for partners).
+    order_ids: list[str] = []
+    if order_lookup:
+        logs, order_ids = await asyncio.to_thread(order_logs.context_for, history, team)
+        extra = "\n\n".join(t for t in (extra, logs) if t)
     guard.acquire(client_key)
 
     async def generate():
@@ -476,17 +498,17 @@ async def chat(req: ChatRequest, request: Request, x_access_code: str | None = H
         answer = "".join(answer_parts)
         _log(answer, latency_s=round(time.time() - started, 2), usage=usage,
              redacted=sorted(set(redactor.hits)), spam="off_topic" if off_topic else reason,
-             internal_context_chars=len(extra), gap=catcher.topic)
+             internal_context_chars=len(extra), gap=catcher.topic, order_lookup=order_ids or None)
         analytics.record("chat", audience=audience, team=team, user=user.uid, conversation=cid, turn=len(history),
                          question=question["content"], answer=answer, gap=catcher.topic, off_topic=off_topic,
                          latency_s=round(time.time() - started, 2), tokens=usage.get("output_tokens"),
                          message_id=message_id)
         failed = not answer.strip() or any(t in answer for t in (ERROR_TEXT, REFUSAL_TEXT, "Local setup issue"))
-        stats.bump(bucket, who, asked=1, gaps=int(bool(catcher.topic) and not off_topic), off_topic=int(off_topic),
+        stats.bump(bucket, who, asked=1, ai=1, gaps=int(bool(catcher.topic) and not off_topic), off_topic=int(off_topic),
                    spam=int(reason == "manipulation"), errors=int(failed),
                    answered=int(not (catcher.topic or off_topic or reason or failed)))
         # Only clean, complete first answers are reused.
-        if (first_turn and finished and not off_topic and not catcher.topic and not reason and answer.strip()
+        if (first_turn and finished and not order_ids and not off_topic and not catcher.topic and not reason and answer.strip()
                 and not any(t in answer for t in (ERROR_TEXT, REFUSAL_TEXT, CUT_SHORT_TEXT.strip(), "Local setup issue"))):
             try:
                 answer_cache.put(question["content"], audience, team, answer, message_id)
@@ -519,6 +541,8 @@ def feedback(fb: Feedback, request: Request, x_access_code: str | None = Header(
     fb_conv = users.get_conversation(user, fb.conversation_id) if fb.conversation_id else None
     stats.bump(gaps.bucket_for(user.is_internal, (fb_conv or {}).get("team") if user.is_internal else None),
                _user_label(user), **{fb.rating: 1})
+    if fb.rating == "down":
+        local_model.reject(fb.message_id)    # a wrong local FAQ answer: that question goes to the AI next time
     conv = users.get_conversation(user, fb.conversation_id) if fb.rating == "down" and fb.conversation_id else None
     msgs = (conv or {}).get("messages", [])
     at = next((i for i, m in enumerate(msgs) if m.get("id") == fb.message_id), None)
@@ -1193,7 +1217,8 @@ def admin_insights(request: Request) -> dict:
     return {"state": analytics.state(), "schedule_text": sources.describe(analytics.state()["schedule"]),
             "collected": analytics._numbers(evs) if evs else {"questions": 0}, "records": len(evs),
             "reports": [{k: r[k] for k in ("id", "created", "by", "numbers", "events")} for r in analytics.reports()][:30],
-            "cache": answer_cache.stats(), "gmail": mailer.connected(), "enabled": config.ANALYTICS_ENABLED}
+            "cache": answer_cache.stats(), "local_model": local_model.stats(), "gmail": mailer.connected(),
+            "enabled": config.ANALYTICS_ENABLED}
 
 
 @app.get("/api/admin/insights/export")
@@ -1234,6 +1259,38 @@ def admin_insights_schedule(body: InsightsSchedule, request: Request) -> dict:
     nxt = sources.next_run(sch, sources.now())
     analytics.update_state(schedule=sch, next_run=sources.iso(nxt))
     _audit(request, "insights_schedule", who, schedule=sources.describe(sch))
+    return {"ok": True, "schedule_text": sources.describe(sch), "next_run": sources.iso(nxt)}
+
+
+@app.get("/api/admin/local-model")
+def admin_local_model(request: Request) -> dict:
+    """The local FAQ model: what it is doing now, how good the current model is, its schedule."""
+    _super(request)
+    st = local_model_train.state()
+    return {"state": st, "schedule_text": sources.describe(st["schedule"]), "stats": local_model.stats(),
+            "pool": len(read_json(local_model_train.POOL, {}) or {}),
+            "retrain": config.LOCAL_MODEL_RETRAIN, "audiences": sorted(config.LOCAL_MODEL_AUDIENCES)}
+
+
+@app.post("/api/admin/local-model/run")
+def admin_local_model_run(request: Request) -> dict:
+    who = _super(request)
+    if not jobs.enqueue("local_model", "full", who["admin"]):
+        raise HTTPException(status_code=409, detail="Already queued or running")
+    _audit(request, "local_model_run", who)
+    return {"ok": True}
+
+
+@app.post("/api/admin/local-model/schedule")
+def admin_local_model_schedule(body: InsightsSchedule, request: Request) -> dict:
+    who = _super(request)
+    try:
+        sch = sources.clean_schedule(body.schedule)
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    nxt = sources.next_run(sch, sources.now())
+    local_model_train.update_state(schedule=sch, next_run=sources.iso(nxt))
+    _audit(request, "local_model_schedule", who, schedule=sources.describe(sch))
     return {"ok": True, "schedule_text": sources.describe(sch), "next_run": sources.iso(nxt)}
 
 

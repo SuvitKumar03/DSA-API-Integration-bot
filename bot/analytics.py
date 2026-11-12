@@ -9,7 +9,8 @@
        sends the events to the AI in batches for notes, then writes one report (themes, top
        questions, where users struggle, FAQ candidates, suggestions);
        saves the report (analytics/reports/), emails it to super admins, and deletes the raw
-       events, so the next period starts fresh (ANALYTICS_KEEP_EXPORTS keeps copies).
+       events, so the next period starts fresh (ANALYTICS_KEEP_EXPORTS keeps copies). Partners'
+       first questions are kept first (text only) for the local FAQ model's training pool.
 Admins can download the raw JSON collected so far at any time from the admin page.
 """
 
@@ -170,6 +171,11 @@ async def run(by: str, progress=lambda msg: None) -> tuple[str, str]:
         write_json(f"analytics/exports/{rid}.json", evs)
         for old in sorted(data().list("analytics/exports"))[:-config.ANALYTICS_KEEP_EXPORTS]:
             data().delete(old)
+    try:                                            # keep partners' questions for the local FAQ model
+        from bot import local_model_train
+        local_model_train.collect(evs)
+    except Exception:
+        log.exception("Could not hand questions to the local model pool")
     for e in evs:                                   # flush: the next period starts fresh
         data().delete(f"analytics/events/{e['id']}.json")
     message = f"Report for {len(evs)} records ({numbers['questions']} questions); raw records cleared"

@@ -230,6 +230,14 @@
     <h2 style="margin:18px 0 6px">Answer cache</h2>
     <p class="hint" id="cacheInfo"></p>
     <div class="row" style="margin-top:0"><button class="btn" id="clearCache">Clear the cache</button></div>
+    <h2 style="margin:18px 0 6px">Local FAQ model</h2>
+    <p class="hint">A small model that answers partners' first questions straight from the FAQ when it is sure, with no AI call. It retrains itself on the schedule below and 30 minutes after FAQ questions change, learning from new FAQ entries, real partner questions and 👎. A new model is used only if it passes the accuracy test; servers pick it up within a minute.</p>
+    <div class="stats" id="lmStats"></div>
+    <div class="sched" id="lmSched"></div>
+    <div class="row" style="margin-top:0"><button class="btn" id="saveLmSched">Save schedule</button><button class="btn" id="runLm">Retrain now</button></div>
+    <div class="hint" id="lmState" style="margin-top:8px"></div>
+    <div style="overflow:auto"><table id="lmRuns"><thead><tr><th>When</th><th>By</th><th>Result</th><th>Message</th></tr></thead><tbody></tbody></table></div>
+    <div id="lmMsg"></div>
     <h2 style="margin:18px 0 6px">Reports</h2>
     <div style="overflow:auto"><table id="repTable"><thead><tr><th>Created</th><th>Questions</th><th>Users</th><th>Gaps</th><th>👍 / 👎</th><th></th></tr></thead><tbody></tbody></table></div>
     <pre class="report" id="repText" hidden></pre>
@@ -822,7 +830,34 @@ async function showInsights() {
   }
   if (!d.reports.length) body.innerHTML = '<tr><td colspan="6" class="hint">No reports yet.</td></tr>';
   $("insights").hidden = false;
+  showLocalModel().catch((e) => lmMsg("err", e.message));
 }
+let lmSchedule = null;
+function lmMsg(kind, text) { $("lmMsg").innerHTML = text ? `<div class="${kind}"></div>` : ""; if (text) $("lmMsg").firstChild.textContent = text; }
+async function showLocalModel() {
+  const d = await call("/api/admin/local-model"), st = d.state, m = d.stats.metrics || {};
+  const r = m.real || m.overall, pct = (x) => x == null ? "–" : `${Math.round(100 * x)}%`;
+  const stat = (v, l) => `<div class="stat"><b>${v ?? 0}</b><span>${l}</span></div>`;
+  $("lmStats").innerHTML = stat(d.stats.trained ? new Date(d.stats.trained).toLocaleDateString() : "never", "last trained")
+    + stat(pct(r?.coverage), "FAQ-type questions it answers (test)") + stat(pct(r?.precision), "right when it answers (test)")
+    + stat(d.stats.threshold ?? "–", "confidence needed") + stat(d.pool, "real questions kept for training")
+    + stat(d.stats.answered, "answered since server start");
+  lmSchedule = picker($("lmSched"), st.schedule);
+  $("lmState").textContent = (d.retrain ? `${d.schedule_text}.` : "Automatic retraining is off (LOCAL_MODEL_RETRAIN=false).")
+    + ` Status: ${st.status}${st.message ? ` (${st.message})` : ""}. Next: ${st.next_run ? new Date(st.next_run).toLocaleString() : "-"}.`
+    + ` Answers: ${d.audiences.join(", ")} users.`;
+  const body = $("lmRuns").querySelector("tbody"); body.innerHTML = "";
+  for (const run of st.runs || []) { const tr = document.createElement("tr"); cells(tr, [new Date(run.ts).toLocaleString(), run.by, run.result, run.message]); body.appendChild(tr); }
+  if (!(st.runs || []).length) body.innerHTML = '<tr><td colspan="4" class="hint">No runs yet.</td></tr>';
+}
+$("saveLmSched").onclick = async () => {
+  try { const r = await call("/api/admin/local-model/schedule", { schedule: lmSchedule() }); lmMsg("ok", `Saved: ${r.schedule_text}.`); showLocalModel(); }
+  catch (e) { lmMsg("err", e.message); }
+};
+$("runLm").onclick = async () => {
+  try { await call("/api/admin/local-model/run", {}); lmMsg("ok", "Queued. Progress shows under Sources; results appear here when done."); }
+  catch (e) { lmMsg("err", e.message); }
+};
 $("saveInsSched").onclick = async () => {
   try { const r = await call("/api/admin/insights/schedule", { schedule: insSchedule() }); insMsg("ok", `Saved: ${r.schedule_text}.`); showInsights(); }
   catch (e) { insMsg("err", e.message); }

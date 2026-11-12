@@ -37,7 +37,9 @@ Claude). Not deployed yet; Google Cloud (Cloud Run) is the target.
    must only ever reach users with `user.is_internal` (prompt audience "internal"); partners' prompts
    load `knowledge/*.md` only. Never send secrets to the AI: repo code passes `scrub_code()`.
 4. **Answer style** (team feedback): short and crisp, only what was asked; ask one clarifying
-   question when a question is ambiguous; partner orders are home collection only.
+   question when a question is ambiguous; partner orders are home collection only; when the
+   answer involves calling an API, end with one ready-to-run curl built only from documented
+   details, with placeholders for secrets and real data (none for concept questions).
 5. **Tests that use the real AI or a browser: one process at a time.** The user's Mac has frozen
    under parallel server + `claude -p` + headless Chrome (load average > 180). Check `uptime`
    first; stop test servers afterwards.
@@ -73,9 +75,12 @@ Use `localhost`, not `127.0.0.1` (Google sign-in origin). Private files come in
 | `bot/teams.py` | Team registry (`teams/registry.json`, seeded from DEFAULT_TEAMS in .env); `admin_teams(email)`, `is_super_email` |
 | `bot/gaps.py` | Gaps: `GapCatcher` strips `[[GAP: ...]]` from answers; records per bucket (team / shared / partner); daily `run_bucket` (group → research docs + GitHub code search → draft JSON → proposals → email) |
 | `bot/analytics.py` | `record()` one JSON per interaction (`analytics/events/`); weekly `run()` (code numbers + AI notes per batch + report) then deletes the events |
-| `bot/stats.py` | Daily counters per bucket (`stats/daily/<date>.json`): asked, answered, gaps, cached, off_topic, spam, errors, up, down, strikes, blocks, plus `_users` (by email), `_reasons`, hour arrays; `summary()` for /admin, `dashboard()` for `/dashboard` (`GET /api/admin/dashboard?days=&list=`) |
+| `bot/stats.py` | Daily counters per bucket (`stats/daily/<date>.json`): asked, answered, gaps, cached, local, ai, off_topic, spam, errors, up, down, strikes, blocks, plus `_users` (by email), `_reasons`, hour arrays; `summary()` for /admin, `dashboard()` for `/dashboard` (`GET /api/admin/dashboard?days=&list=`) |
 | `app/static/dashboard.html` | `/dashboard`: tiles, inline-SVG charts (validated palette, light/dark), users table, blocked now |
 | `bot/answer_cache.py` | Cache of first answers keyed by version + audience + team + normalised question; checked in `/api/chat` before spam checks and the AI |
+| `bot/local_model.py` | Local FAQ model: TF-IDF → logistic regression (inference in plain Python), answers partner first questions that clearly match a `04-faq.md` entry, checked after the answer cache (`X-Answer: local`); loads `local_model/model.json` within 60 s; 👎 → `rejected.json` |
+| `bot/order_logs.py` | Order logs for internal users: order/lead ID in the question (+ a word like "order") → one ES query via the log UI console proxy (`LOGS_API_KEY` or `LOGS_USERNAME`/`LOGS_PASSWORD`) → personal fields hidden, secrets scrubbed, repeats folded → `<order_logs>` timeline in the prompt; 2-min cache; no answer cache for these; `scripts/check_order_logs.py` tests it |
+| `bot/local_model_train.py` | Its retraining: job `local_model` (daily + 30 min after FAQ questions change); question pool (`real_questions.json`, fed by analytics before clean-up), AI teacher only for new entries/questions, CV + precision gate, saves model, emails; `scripts/train_local_model.py` = same by hand |
 | `bot/mailer.py` | Gmail API send-only (`GMAIL_TOKEN_FILE` from `scripts/connect_gmail.py`) |
 | `bot/blobs.py` | App data storage (users, sources): `DATA_DIR` or GCS (`DATA_BUCKET`/`DATA_PREFIX`) |
 | `bot/retrieval.py` | Internal docs: catalog (cached) + BM25 section search for internal users' questions |
@@ -119,6 +124,12 @@ Endpoints: `GET /`, `/admin`, `/healthz`, `/api/config`, `/api/me`, `/api/conver
 - **Cache and insights:** `/api/chat` returns a cached first answer (header `X-Answer: cached`)
   before any AI call; clean complete first answers are saved; 👎 drops it. Every chat / feedback /
   spam reply is recorded for the weekly insights job (`insights` in the job queue).
+- **Local FAQ model:** after the cache, `local_model.answer()` (partners' first questions) →
+  FAQ answer, no AI. Job `local_model` retrains it (daily + after FAQ question changes) and
+  saves only if cross-validation meets the precision target; servers reload it, no redeploy.
+- **Order logs:** internal users only (never partners: other partners' orders, internal service
+  names). `order_logs.context_for(history, team)` adds `<order_logs>` to `extra`; errors become a
+  status="error" block so the answer says logs couldn't be checked. Lookups logged as `order_lookup`.
 - **Gaps:** answer ends with hidden `[[GAP: topic]]` (prompt rule) or 👎 with conversation id →
   `gaps/items/<bucket>/`. Job `gaps:<bucket>` in the same queue, daily (default 15:00) → drafts in
   `gaps/proposals/`; admin Add goes through `_apply_change` (history + audit). Internal drafts only
