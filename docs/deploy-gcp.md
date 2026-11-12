@@ -74,7 +74,10 @@ gcloud iam service-accounts create $SA --display-name "Partner assistant"
 ```bash
 gcloud storage buckets create gs://$BUCKET --location=$REGION \
   --uniform-bucket-level-access --public-access-prevention
-gcloud storage cp knowledge/*.md gs://$BUCKET/knowledge/
+gcloud storage cp -r knowledge/* gs://$BUCKET/knowledge/
+# What was already set up on the laptop: teams, sources, and the trained local FAQ model
+# (its practice data saves the AI calls of building it again).
+gcloud storage cp -r data/teams data/sources data/local_model gs://$BUCKET/data/
 gcloud storage buckets add-iam-policy-binding gs://$BUCKET \
   --member=serviceAccount:$SA_EMAIL --role=roles/storage.objectAdmin
 ```
@@ -106,7 +109,10 @@ gcloud secrets create gmail-token --data-file=chat_export/gmail_token.json
 gcloud secrets create gchat-token --data-file=chat_export/token.json
 gcloud secrets create private-names --data-file=chat_export/private_names.json
 
-for s in anthropic-api-key admin-session-secret internal-terms cron-secret github-token gmail-token gchat-token private-names; do
+# Order logs: password of the read-only log search user (or its API key)
+printf '%s' '<password>' | gcloud secrets create logs-password --data-file=-
+
+for s in anthropic-api-key admin-session-secret internal-terms cron-secret github-token gmail-token gchat-token private-names logs-password; do
   gcloud secrets add-iam-policy-binding $s \
     --member=serviceAccount:$SA_EMAIL --role=roles/secretmanager.secretAccessor
 done
@@ -131,12 +137,14 @@ deploy again). `deploy/env.yaml` is git-ignored.
 gcloud run deploy $SERVICE --source . --region $REGION \
   --service-account $SA_EMAIL \
   --env-vars-file deploy/env.yaml \
-  --set-secrets "ANTHROPIC_API_KEY=anthropic-api-key:latest,ADMIN_SESSION_SECRET=admin-session-secret:latest,CRON_SECRET=cron-secret:latest,GITHUB_TOKEN=github-token:latest,/secrets/terms/internal_terms.txt=internal-terms:latest,/secrets/gmail/gmail_token.json=gmail-token:latest,/secrets/gchat/token.json=gchat-token:latest,/secrets/names/private_names.json=private-names:latest" \
+  --set-secrets "ANTHROPIC_API_KEY=anthropic-api-key:latest,ADMIN_SESSION_SECRET=admin-session-secret:latest,CRON_SECRET=cron-secret:latest,GITHUB_TOKEN=github-token:latest,/secrets/terms/internal_terms.txt=internal-terms:latest,/secrets/gmail/gmail_token.json=gmail-token:latest,/secrets/gchat/token.json=gchat-token:latest,/secrets/names/private_names.json=private-names:latest,LOGS_PASSWORD=logs-password:latest" \
   --allow-unauthenticated \
   --min-instances 1 --max-instances 1 --no-cpu-throttling \
   --memory 2Gi --cpu 1 --timeout 300 --concurrency 40
 ```
 
+- Only list secrets you created in step 4: leave out e.g. `gchat-token` if you skipped it, or
+  the deploy fails.
 - `--source .` builds the image with Cloud Build from the `Dockerfile`. `.gcloudignore` keeps
   `.env`, keys, private docs, internal terms and logs out of the upload.
 - `--allow-unauthenticated` lets partners reach the page; the app's own access codes protect
