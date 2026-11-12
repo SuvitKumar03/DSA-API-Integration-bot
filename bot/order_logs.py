@@ -34,7 +34,7 @@ CACHE_SECONDS = 120
 MAX_IDS = 3
 LOOKBACK_MESSAGES = 4          # user messages to look back for an ID in follow-ups
 MESSAGE_CHARS = 600
-TRIGGER = re.compile(r"\b(order|orders|lead|booking|ref|logs?|status|stuck|fail|failed|failing|error|track|kya hua|kahan|happened|why|cancel\w*|reschedul\w*|collected|report)\b", re.I)
+TRIGGER = re.compile(r"\b(order|orders|order_?id|orderno|visit_?id|lead|lead_?id|details?|info|batao|bata|booking|ref|logs?|status|stuck|fail|failed|failing|error|track|kya hua|kahan|happened|why|cancel\w*|reschedul\w*|collected|report)\b", re.I)
 MOBILE = re.compile(r"^(?:91)?[6-9]\d{9}$")
 TIME_FIELDS = ("@timestamp", "timestamp", "time", "ts")
 LEVEL_FIELDS = ("log.level", "level", "severity", "loglevel", "log_level")
@@ -156,7 +156,8 @@ def logs_block(order_id: str, index: str) -> str:
     hit = _cache.get(key)
     if hit and time.monotonic() - hit[0] < CACHE_SECONDS:
         return hit[1]
-    head = f'<order_logs order_id="{order_id}" lookback_days="{config.LOGS_LOOKBACK_DAYS}"'
+    env = f' environment="{config.LOGS_ENVIRONMENT}"' if config.LOGS_ENVIRONMENT else ""
+    head = f'<order_logs order_id="{order_id}"{env} lookback_days="{config.LOGS_LOOKBACK_DAYS}"'
     try:
         res = search(order_id, index)
     except PermissionError as e:
@@ -185,7 +186,8 @@ def logs_block(order_id: str, index: str) -> str:
     rows = sorted(seen.values(), key=lambda r: r[0])
     lines = [" | ".join(r[:4]) + (f" (×{r[4]})" if r[4] > 1 else "") for r in rows]
     if not lines:
-        block = f"{head} status=\"not_found\">No log lines mention this ID in the last {config.LOGS_LOOKBACK_DAYS} days.</order_logs>"
+        where = f" of the {config.LOGS_ENVIRONMENT} logs (it may be an order from another environment)" if config.LOGS_ENVIRONMENT else ""
+        block = f"{head} status=\"not_found\">No log lines mention this ID in the last {config.LOGS_LOOKBACK_DAYS} days{where}.</order_logs>"
     else:
         shown = sum(r[4] for r in rows)
         note = (f"latest {shown} of {total} lines" if total > shown else f"all {total} lines") + \

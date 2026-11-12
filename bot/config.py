@@ -203,8 +203,13 @@ LOGS_LOOKBACK_DAYS = int(os.getenv("LOGS_LOOKBACK_DAYS", "30"))
 LOGS_MAX_HITS = int(os.getenv("LOGS_MAX_HITS", "100"))
 LOGS_MAX_CHARS = int(os.getenv("LOGS_MAX_CHARS", "20000"))    # log text per order in the prompt
 LOGS_TIMEOUT_SECONDS = float(os.getenv("LOGS_TIMEOUT_SECONDS", "15"))
-# What counts as an order ID in a question (default: 8-20 digits, or 1-6 letters + 5+ digits like SP83281753).
-ORDER_ID_PATTERN = re.compile(os.getenv("ORDER_ID_PATTERN", r"(?<![\w-])(?:[A-Za-z]{1,6}\d{5,}|\d{8,20})(?![\w-])"))
+# What counts as an order ID in a question (default: 8-20 digits, or 6-20 letters and digits with
+# at least 2 digits and a capital letter, like CTLSP84519603, SP83281753 or VLA835B8).
+ORDER_ID_PATTERN = re.compile(os.getenv(
+    "ORDER_ID_PATTERN",
+    r"(?<![\w-])(?:\d{8,20}|(?=[A-Za-z0-9]*[A-Z])(?=(?:[A-Za-z]*\d){2})[A-Za-z0-9]{6,20})(?![\w-])"))
+# Which logs these are, so answers can say "not found in the staging logs".
+LOGS_ENVIRONMENT = os.getenv("LOGS_ENVIRONMENT", "")
 # Teams that get order lookups (comma-separated slugs); empty = every internal user.
 ORDER_LOOKUP_TEAMS = {t.strip() for t in os.getenv("ORDER_LOOKUP_TEAMS", "").split(",") if t.strip()}
 
