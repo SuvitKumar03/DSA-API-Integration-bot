@@ -247,6 +247,8 @@ def user_google_login(body: GoogleLogin, request: Request) -> JSONResponse:
     guard.check_blocked(_subjects(request, user))
     users.touch_profile(user, claims.get("picture", ""))
     log.info("User sign-in: %s (%s)", email, user.role)
+    stats.activity(gaps.bucket_for(user.is_internal, None), email, ip=_client_ip(request),
+                   agent=request.headers.get("user-agent", ""), login=True)
     res = JSONResponse({"email": email, "name": user.name, "picture": claims.get("picture", ""), "role": user.role})
     secure = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
     res.set_cookie(USER_COOKIE, admin_auth.make_session(email, "user", config.USER_SESSION_DAYS * 24,
@@ -378,6 +380,7 @@ async def chat(req: ChatRequest, request: Request, x_access_code: str | None = H
 
     bucket = gaps.bucket_for(user.is_internal, team)      # for the admin page counts (bot/stats.py)
     who = _user_label(user)
+    stats.activity(bucket, who, ip=_client_ip(request), agent=request.headers.get("user-agent", ""), conversation=cid)
 
     # Answer cache: a first question asked before (same audience, team, knowledge) needs no AI call.
     first_turn = len(history) == 1
@@ -504,7 +507,7 @@ async def chat(req: ChatRequest, request: Request, x_access_code: str | None = H
                          latency_s=round(time.time() - started, 2), tokens=usage.get("output_tokens"),
                          message_id=message_id)
         failed = not answer.strip() or any(t in answer for t in (ERROR_TEXT, REFUSAL_TEXT, "Local setup issue"))
-        stats.bump(bucket, who, asked=1, ai=1, gaps=int(bool(catcher.topic) and not off_topic), off_topic=int(off_topic),
+        stats.bump(bucket, who, asked=1, ai=1, order_lookups=int(bool(order_ids)), gaps=int(bool(catcher.topic) and not off_topic), off_topic=int(off_topic),
                    spam=int(reason == "manipulation"), errors=int(failed),
                    answered=int(not (catcher.topic or off_topic or reason or failed)))
         # Only clean, complete first answers are reused.

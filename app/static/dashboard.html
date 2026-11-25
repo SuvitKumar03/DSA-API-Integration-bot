@@ -155,14 +155,27 @@
     <section class="card" style="margin-bottom:14px">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
         <div><h2>Users</h2><p class="sub" style="margin:0" id="usersSub"></p></div>
-        <input type="search" id="q" placeholder="Search email" style="margin-left:auto;min-width:220px" aria-label="Search users">
+        <input type="search" id="q" placeholder="Search email or IP" style="margin-left:auto;min-width:220px" aria-label="Search users">
+        <button id="csv" type="button">Download CSV</button>
       </div>
       <div class="scroll"><table id="users"><thead><tr>
         <th class="sort" data-k="email">User</th><th>Lists</th>
         <th class="sort num" data-k="asked">Questions</th><th class="sort num" data-k="answered">Answered</th>
         <th class="sort num" data-k="gaps">Missed (gaps)</th><th class="sort num" data-k="strikes">Strikes</th>
         <th class="sort num" data-k="blocks">Times blocked</th><th class="sort num" data-k="down">👎</th>
-        <th class="sort num" data-k="days">Active days</th><th class="sort" data-k="last">Last active</th>
+        <th class="sort num" data-k="days">Active days</th><th class="sort num" data-k="active_s">Time spent</th>
+        <th class="sort num" data-k="sessions">Sessions</th><th class="sort num" data-k="conversations">Chats</th>
+        <th class="sort num" data-k="order_lookups">Order lookups</th><th class="sort num" data-k="nips">IPs</th>
+        <th>Last IP</th><th>Device</th><th class="sort" data-k="last">Last active</th>
+      </tr></thead><tbody></tbody></table></div>
+      <p class="sub" style="margin-top:8px">Time spent: time between a user's requests while they keep asking (a pause over 15 minutes starts a new session), plus a minute per session. IP addresses and devices are kept for 90 days.</p>
+    </section>
+
+    <section class="card" style="margin-bottom:14px">
+      <h2>IP addresses</h2>
+      <p class="sub" id="ipsSub"></p>
+      <div class="scroll"><table id="ips"><thead><tr>
+        <th>IP</th><th>Users</th><th class="num">Requests</th><th>Devices</th><th>Last seen</th>
       </tr></thead><tbody></tbody></table></div>
     </section>
 
@@ -314,6 +327,8 @@ function render() {
     + tile(t.gaps, "missed (docs had no answer)", t.asked ? `${Math.round(100 * t.gaps / t.asked)}% of questions` : "")
     + tile(t.strikes, "times users misbehaved", "strikes given") + tile(t.blocks, "times a user was blocked", "2-hour blocks", t.blocks ? "bad" : "")
     + tile(t.blocked_users, "users blocked", "at least once") + tile(d.blocked_now.length, "blocked right now", "", d.blocked_now.length ? "bad" : "")
+    + tile(t.active_hours, "hours of use", "time spent by all users")
+    + tile(t.ips, "IP addresses", t.shared_ips ? `${t.shared_ips} used by more than one user` : "")
     + tile(t.down, "👎 answers")
     + tile(t.ai, "sent to Claude", "AI calls")
     + tile(t.local, "answered by local model", "no AI call") + tile(t.cached, "answered from cache", "no AI call")
@@ -348,9 +363,12 @@ function render() {
   bb.innerHTML = d.blocked_now.length ? d.blocked_now.map((b) => `<tr><td>${esc(b.subject.replace(/^user:/, ""))}</td><td>${esc(new Date(b.until * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))}</td><td>${esc(b.reason)}</td><td>${esc(b.by)}</td></tr>`).join("")
     : '<tr><td colspan="4" style="color:var(--muted)">Nobody is blocked right now.</td></tr>';
 }
+function dur(s) { s = Math.round(s / 60); return s < 60 ? `${s} min` : `${Math.floor(s / 60)} h ${s % 60} min`; }
+function when(v) { return v ? new Date(v).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "-"; }
 function renderUsers() {
   const q = $("q").value.trim().toLowerCase();
-  const rows = data.users.filter((u) => !q || u.email.includes(q))
+  data.users.forEach((u) => { u.nips = (u.ips || []).length; });
+  const rows = data.users.filter((u) => !q || u.email.includes(q) || (u.ips || []).some((i) => i.ip.includes(q)))
     .sort((a, b) => (typeof a[sortKey] === "string" ? a[sortKey].localeCompare(b[sortKey]) : a[sortKey] - b[sortKey]) * sortDir);
   $("usersSub").textContent = `${data.users.length} user${data.users.length === 1 ? "" : "s"} in this period · click a column to sort`;
   document.querySelectorAll("#users th.sort").forEach((th) => { th.textContent = th.textContent.replace(/ [▲▼]$/, "") + (th.dataset.k === sortKey ? (sortDir < 0 ? " ▼" : " ▲") : ""); });
@@ -358,8 +376,31 @@ function renderUsers() {
   $("users").querySelector("tbody").innerHTML = rows.length ? rows.map((u) => `<tr><td>${esc(u.email)}</td>
     <td>${u.lists.map((l) => `<span class="pill">${esc(data.names[l] || l)}</span>`).join("")}</td>
     ${n(u.asked)}${n(u.answered)}${n(u.gaps)}${n(u.strikes, true)}${n(u.blocks, true)}${n(u.down)}${n(u.days)}
-    <td>${u.last ? esc(new Date(u.last).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })) : "-"}</td></tr>`).join("")
-    : '<tr><td colspan="10" style="color:var(--muted)">No users match.</td></tr>';
+    <td class="num">${dur(u.active_s || 0)}</td>${n(u.sessions || 0)}${n(u.conversations || 0)}${n(u.order_lookups || 0)}
+    <td class="num" title="${esc((u.ips || []).map((i) => `${i.ip} (${i.requests})`).join("\n"))}">${u.nips}</td>
+    <td>${esc(u.last_ip || "-")}</td><td>${esc(u.devices?.[0]?.device || "-")}</td>
+    <td>${esc(when(u.last))}</td></tr>`).join("")
+    : '<tr><td colspan="17" style="color:var(--muted)">No users match.</td></tr>';
+  const ips = data.ips || [];
+  $("ipsSub").textContent = ips.length ? `${ips.length} IP address${ips.length === 1 ? "" : "es"} in this period; ones used by more than one user first` : "";
+  $("ips").querySelector("tbody").innerHTML = ips.length ? ips.filter((r) => !q || r.ip.includes(q) || r.users.some((e) => e.includes(q))).map((r) => `<tr>
+    <td>${esc(r.ip)}${r.users.length > 1 ? ' <span class="pill">shared</span>' : ""}</td><td>${r.users.map(esc).join("<br>")}</td>
+    <td class="num">${r.requests}</td><td>${r.devices.map(esc).join("<br>")}</td><td>${esc(when(r.last))}</td></tr>`).join("")
+    : '<tr><td colspan="5" style="color:var(--muted)">No IP addresses recorded in this period.</td></tr>';
+}
+function downloadCsv() {
+  const cols = ["email", "asked", "answered", "gaps", "ai", "local", "cached", "order_lookups", "conversations", "sessions",
+    "active_minutes", "days", "logins", "strikes", "blocks", "up", "down", "first", "last", "last_ip", "ips", "devices"];
+  const cell = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const lines = [cols.join(",")].concat(data.users.map((u) => cols.map((c) => cell(
+    c === "active_minutes" ? Math.round((u.active_s || 0) / 60)
+    : c === "ips" ? (u.ips || []).map((i) => `${i.ip} (${i.requests})`).join("; ")
+    : c === "devices" ? (u.devices || []).map((d) => `${d.device} (${d.requests})`).join("; ") : u[c])).join(",")));
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
+  a.download = `users-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 async function load() {
   data = await call(`/api/admin/dashboard?days=${days}&list=${encodeURIComponent($("list").value || "all")}`);
@@ -372,6 +413,7 @@ document.querySelectorAll("#periods button").forEach((b) => b.onclick = () => {
 });
 $("list").onchange = load;
 $("q").oninput = renderUsers;
+$("csv").onclick = () => data && downloadCsv();
 document.querySelectorAll("#users th.sort").forEach((th) => th.onclick = () => {
   sortDir = sortKey === th.dataset.k ? -sortDir : (th.dataset.k === "email" ? 1 : -1); sortKey = th.dataset.k; renderUsers();
 });

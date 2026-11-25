@@ -222,3 +222,9 @@ ANALYTICS_DEFAULT_TIME = os.getenv("ANALYTICS_DEFAULT_TIME", "10:00")
 ANALYTICS_BATCH_CHARS = int(os.getenv("ANALYTICS_BATCH_CHARS", "150000"))
 # Keep a copy of the analysed raw records for this many runs (0 = delete right after the report).
 ANALYTICS_KEEP_EXPORTS = int(os.getenv("ANALYTICS_KEEP_EXPORTS", "0"))
+
+# ---------------------------------------------------------------- usage tracking
+# Per user per day (bot/stats.py, /dashboard): IP addresses, devices, sessions, active time,
+# conversations, sign-ins. IPs and devices are personal data: removed after this many days.
+USAGE_TRACKING = os.getenv("USAGE_TRACKING", "true").lower() == "true"
+USAGE_IP_DAYS = int(os.getenv("USAGE_IP_DAYS", "90"))
